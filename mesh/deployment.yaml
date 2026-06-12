@@ -14,41 +14,6 @@ defaults:
     stateful: true
 
 edge:
-  web-server-sink:
-    stateful: true
-    containers:
-      webserver:
-        probes:
-          readiness:
-            httpGet:
-              path: /health
-              port: 80
-              scheme: HTTP
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          liveness:
-            httpGet:
-              path: /health
-              port: 80
-              scheme: HTTP
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          startup:
-            httpGet:
-              path: /health
-              port: 80
-              scheme: HTTP
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
   opensearch-sink:
     replicas: 1
     podDisruptionBudget:

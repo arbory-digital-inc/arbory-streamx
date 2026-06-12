@@ -13,34 +13,6 @@ descriptors:
         outgoing:
           relayed-events: {}
 
-  external-references-rewriter:
-    type: processing
-    containers:
-      processor:
-        image: ghcr.io/streamx-com/streamx-blueprints/external-references-rewriter:3.0.19-native
-        incoming:
-          incoming-resources: {}
-        outgoing:
-          outgoing-resources: {}
-          download-requests: {}
-
-  resource-downloader:
-    type: processing
-    volumes:
-      rocksdb:
-        size: 5Gi
-    containers:
-      processor:
-        image: ghcr.io/streamx-com/streamx-blueprints/resource-downloader:3.0.19-native
-        incoming:
-          download-requests: {}
-        outgoing:
-          downloaded-pages: {}
-          downloaded-assets: {}
-          downloaded-web-resources: {}
-        volumes:
-          - rocksdb:/var/lib/rocksdb
-
   indexable-resources-producer:
     type: processing
     containers:
@@ -117,18 +89,6 @@ sources:
         produces:
           - com.streamx.blueprints.page.published.v1
           - com.streamx.blueprints.page.unpublished.v1
-      - ref: inbox.download-requests
-        produces:
-          - com.streamx.blueprints.download.schedule.v1
-          - com.streamx.blueprints.download.unschedule.v1
-      - ref: inbox.web-resources
-        produces:
-          - com.streamx.blueprints.web-resource.published.v1
-          - com.streamx.blueprints.web-resource.unpublished.v1
-      - ref: inbox.assets
-        produces:
-          - com.streamx.blueprints.asset.published.v1
-          - com.streamx.blueprints.asset.unpublished.v1
 
 ingestion:
   rest-ingestion:
@@ -151,76 +111,6 @@ processing:
           relayed-events:
             ref: outbox.pages
 
-  assets-relay:
-    descriptor: relay
-    containers:
-      service:
-        incoming:
-          events:
-            ref: inbox.assets
-        outgoing:
-          relayed-events:
-            ref: outbox.assets
-
-
-  download-requests-relay:
-    descriptor: relay
-    containers:
-      service:
-        incoming:
-          events:
-            ref: inbox.download-requests
-        outgoing:
-          relayed-events:
-            ref: relay.download-requests
-
-  pages-external-references-rewriter:
-    descriptor: external-references-rewriter
-    containers:
-      processor:
-        incoming:
-          incoming-resources:
-            ref: inbox.pages
-        outgoing:
-          outgoing-resources:
-            ref: relay.pages
-          download-requests:
-            ref: relay.download-requests
-        environmentFrom:
-          configs:
-            - external-references-rewriter.pages.properties
-
-  web-resources-external-references-rewriter:
-    descriptor: external-references-rewriter
-    containers:
-      processor:
-        incoming:
-          incoming-resources:
-            ref: inbox.web-resources
-        outgoing:
-          outgoing-resources:
-            ref: outbox.web-resources
-          download-requests:
-            ref: relay.download-requests
-        environmentFrom:
-          configs:
-            - external-references-rewriter.web-resources.properties
-
-  resource-downloader:
-    descriptor: resource-downloader
-    containers:
-      processor:
-        incoming:
-          download-requests:
-            ref: relay.download-requests
-        outgoing:
-          downloaded-pages:
-            ref: inbox.pages
-          downloaded-assets:
-            ref: inbox.assets
-          downloaded-web-resources:
-            ref: inbox.web-resources
-
 
   indexable-resources-producer:
     descriptor: indexable-resources-producer
@@ -228,9 +118,9 @@ processing:
       processor:
         incoming:
           pages:
-            ref: relay.pages
+            ref: inbox.pages
           fragments:
-            ref: relay.fragments
+            ref: inbox.fragments
         outgoing:
           indexable-resources:
             ref: outbox.indexable-resources
