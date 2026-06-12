@@ -1,0 +1,310 @@
+default:
+  environment:
+    STREAMX_BLUEPRINTS_KEY_VALUE_STATE_REPOSITORY_BACKEND: rocksdb
+    STREAMX_BLUEPRINTS_KEY_VALUE_STATE_REPOSITORY_ROCKSDB_PATH: /var/lib/rocksdb
+
+descriptors:
+  relay:
+    type: processing
+    containers:
+      service:
+        incoming:
+          events: {}
+        outgoing:
+          relayed-events: {}
+
+  external-references-rewriter:
+    type: processing
+    containers:
+      processor:
+        image: ghcr.io/streamx-com/streamx-blueprints/external-references-rewriter:3.0.19-native
+        incoming:
+          incoming-resources: {}
+        outgoing:
+          outgoing-resources: {}
+          download-requests: {}
+
+  resource-downloader:
+    type: processing
+    volumes:
+      rocksdb:
+        size: 5Gi
+    containers:
+      processor:
+        image: ghcr.io/streamx-com/streamx-blueprints/resource-downloader:3.0.19-native
+        incoming:
+          download-requests: {}
+        outgoing:
+          downloaded-pages: {}
+          downloaded-assets: {}
+          downloaded-web-resources: {}
+        volumes:
+          - rocksdb:/var/lib/rocksdb
+
+  indexable-resources-producer:
+    type: processing
+    containers:
+      processor:
+        image: ghcr.io/streamx-com/streamx-blueprints/indexable-resources-producer:3.0.19-native
+        incoming:
+          pages: {}
+          fragments: {}
+        outgoing:
+          indexable-resources: {}
+          indexable-resource-fragments: {}
+
+  opensearch-sink:
+    type: edge
+    volumes:
+      opensearch-data:
+        size: 20Gi
+        persistent: true
+      rocksdb:
+        size: 20Gi
+        persistent: true
+    containers:
+      sink:
+        image: ghcr.io/streamx-com/streamx-blueprints/opensearch-sink:3.0.19-native
+        incoming:
+          indexable-resources:
+            initState: delta
+          indexable-resource-fragments:
+            initState: delta
+        servicePorts:
+          - 8082:8080
+        volumes:
+          - opensearch-data:/usr/share/opensearch/data
+          - rocksdb:/var/lib/rocksdb
+        environment:
+          QUARKUS_ELASTICSEARCH_HOSTS: ${STREAMX_SERVICE_ID}.opensearch:9201
+      opensearch:
+        image: registry.prod-ext.streamx.cloud/streamx-docker-hub-public-proxy/opensearchproject/opensearch:2.16.0
+        servicePorts:
+          - 9201:9201
+        volumes:
+          - opensearch-data:/usr/share/opensearch/data
+        environment:
+          network.host: 0.0.0.0
+          http.port: "9201"
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: "true"
+
+  web-server-sink:
+    type: edge
+    volumes:
+      repository-volume:
+        size: 20Gi
+        persistent: true
+    containers:
+      sink:
+        image: ghcr.io/streamx-com/streamx-blueprints/web-server-sink:3.0.19-native
+        incoming:
+          resources:
+            initState: delta
+        servicePorts:
+          - 8083:8080
+        volumes:
+          - repository-volume:/srv/www
+        environment:
+          STREAMX_BLUEPRINTS_WEB_SERVER_SINK_STORAGE_ROOT_DIRECTORY: /srv/www
+      webserver:
+        image: registry.prod-ext.streamx.cloud/streamx-docker-hub-public-proxy/library/nginx:1.26.0
+        servicePorts:
+          - 8084:80
+        volumes:
+          - repository-volume:/usr/share/nginx/html
+networking:
+  httpRoutes:
+    ingestion-route:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          backendRefs:
+            - name: ingestion/rest-ingestion
+              port: 8080
+    web-server-and-search-route:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /search
+          backendRefs:
+            - name: edge/opensearch-sink
+              port: 8082
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          backendRefs:
+            - name: edge/web-server-sink
+              port: 8084
+
+sources:
+  github:
+    outgoing:
+      - ref: inbox.pages
+        produces:
+          - com.streamx.blueprints.page.published.v1
+          - com.streamx.blueprints.page.unpublished.v1
+      - ref: inbox.download-requests
+        produces:
+          - com.streamx.blueprints.download.schedule.v1
+          - com.streamx.blueprints.download.unschedule.v1
+      - ref: inbox.web-resources
+        produces:
+          - com.streamx.blueprints.web-resource.published.v1
+          - com.streamx.blueprints.web-resource.unpublished.v1
+      - ref: inbox.assets
+        produces:
+          - com.streamx.blueprints.asset.published.v1
+          - com.streamx.blueprints.asset.unpublished.v1
+
+ingestion:
+  rest-ingestion:
+    containers:
+      proxy:
+        environment:
+          # Ensures that generated tokens would work between cluster restarts
+          STREAMX_SOURCES_GITHUB_ACCEPT_IAT_FROM: "1704067200"
+          STREAMX_SOURCES_EDS_ACCEPT_IAT_FROM: "1704067200"
+
+processing:
+  pages-relay:
+    descriptor: relay
+    containers:
+      service:
+        incoming:
+          events:
+            ref: relay.pages
+        outgoing:
+          relayed-events:
+            ref: outbox.pages
+
+  assets-relay:
+    descriptor: relay
+    containers:
+      service:
+        incoming:
+          events:
+            ref: inbox.assets
+        outgoing:
+          relayed-events:
+            ref: outbox.assets
+
+
+  download-requests-relay:
+    descriptor: relay
+    containers:
+      service:
+        incoming:
+          events:
+            ref: inbox.download-requests
+        outgoing:
+          relayed-events:
+            ref: relay.download-requests
+
+  pages-external-references-rewriter:
+    descriptor: external-references-rewriter
+    containers:
+      processor:
+        incoming:
+          incoming-resources:
+            ref: inbox.pages
+        outgoing:
+          outgoing-resources:
+            ref: relay.pages
+          download-requests:
+            ref: relay.download-requests
+        environmentFrom:
+          configs:
+            - external-references-rewriter.pages.properties
+
+  web-resources-external-references-rewriter:
+    descriptor: external-references-rewriter
+    containers:
+      processor:
+        incoming:
+          incoming-resources:
+            ref: inbox.web-resources
+        outgoing:
+          outgoing-resources:
+            ref: outbox.web-resources
+          download-requests:
+            ref: relay.download-requests
+        environmentFrom:
+          configs:
+            - external-references-rewriter.web-resources.properties
+
+  resource-downloader:
+    descriptor: resource-downloader
+    containers:
+      processor:
+        incoming:
+          download-requests:
+            ref: relay.download-requests
+        outgoing:
+          downloaded-pages:
+            ref: inbox.pages
+          downloaded-assets:
+            ref: inbox.assets
+          downloaded-web-resources:
+            ref: inbox.web-resources
+
+
+  indexable-resources-producer:
+    descriptor: indexable-resources-producer
+    containers:
+      processor:
+        incoming:
+          pages:
+            ref: relay.pages
+          fragments:
+            ref: relay.fragments
+        outgoing:
+          indexable-resources:
+            ref: outbox.indexable-resources
+          indexable-resource-fragments:
+            ref: outbox.indexable-resource-fragments
+        environmentFrom:
+          configs:
+            - indexable-resources-producer.properties
+
+edge:
+  opensearch-sink:
+    descriptor: opensearch-sink
+    containers:
+      sink:
+        incoming:
+          indexable-resources:
+            ref: outbox.indexable-resources
+          indexable-resource-fragments:
+            ref: outbox.indexable-resource-fragments
+        volumesFrom:
+          configs:
+            - opensearch/service-init:/deployments/opensearch/service-init/additional
+        environmentFrom:
+          secrets:
+            - encrypted/opensearch-sink.properties
+
+      opensearch:
+        environmentFrom:
+          secrets:
+            - encrypted/opensearch-sink-opensearch.properties
+
+  web-server-sink:
+    descriptor: web-server-sink
+    containers:
+      sink:
+        incoming:
+          resources:
+            ref: outbox.pages,outbox.assets,outbox.web-resources
+        environmentFrom:
+          configs:
+            - web-server-sink.properties
+
+      webserver:
+        volumesFrom:
+          configs:
+            - nginx_conf/default.conf:/etc/nginx/conf.d/default.conf

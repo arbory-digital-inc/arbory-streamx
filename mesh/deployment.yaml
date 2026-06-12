@@ -1,0 +1,88 @@
+defaults:
+  global:
+    resources:
+      requests:
+        cpu: 300m
+        memory: 512Mi
+  ingestion:
+    replicas: 1
+  processing:
+    replicas: 1
+    stateful: true
+  edge:
+    replicas: 2
+    stateful: true
+
+edge:
+  web-server-sink:
+    stateful: true
+    containers:
+      webserver:
+        probes:
+          readiness:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          liveness:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          startup:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+  opensearch-sink:
+    replicas: 1
+    podDisruptionBudget:
+      enabled: false
+    containers:
+      opensearch:
+        sidecar: true
+        probes:
+          readiness:
+            httpGet:
+              path: /
+              port: 9201
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          liveness:
+            httpGet:
+              path: /
+              port: 9201
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startup:
+            httpGet:
+              path: /
+              port: 9201
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
