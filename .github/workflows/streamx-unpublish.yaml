@@ -1,0 +1,81 @@
+name: Unpublish from StreamX
+
+on:
+  repository_dispatch:
+    types:
+      - resource-unpublished
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-event-status:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          echo $CLIENT_PAYLOAD
+          echo "Status: ${{ github.event.client_payload.status }}"
+          echo "Path: ${{ github.event.client_payload.path }}"
+
+  unpublish-from-streamx:
+    if: (github.event.client_payload.status == 200 || github.event.client_payload.status == 204) && endsWith(github.event.client_payload.path, '.md')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare ingestion variables
+        id: vars
+        shell: bash
+        run: |
+          sleep 1s
+          streamx_subject=$(echo "${{ github.event.client_payload.path }}" | sed 's/\.md$//g')        
+          echo "CloudEvent subject: ${streamx_subject}"
+          echo "CloudEvent subject plain:: $streamx_subject.plain.html"
+          echo "streamx_subject=${streamx_subject}" >> "$GITHUB_OUTPUT"
+          echo "streamx_subject_plain=$streamx_subject.plain.html" >> "$GITHUB_OUTPUT"
+
+      - name: Run unpublish from StreamX
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 3000
+        with:
+          event-type: 'com.streamx.blueprints.page.unpublished.v1'
+          subject: ${{ steps.vars.outputs.streamx_subject }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+
+
+      - name: Run unpublish plain nav/footer from StreamX
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 3000
+        with:
+          event-type: 'com.streamx.blueprints.page.unpublished.v1'
+          subject: ${{ steps.vars.outputs.streamx_subject_plain }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+
+  unpublish-json-web-resources-from-streamx:
+    if: (github.event.client_payload.status == 200 || github.event.client_payload.status == 204) && endsWith(github.event.client_payload.path, '.json')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare ingestion variables
+        id: vars
+        shell: bash
+        run: |
+          sleep 1s
+          streamx_subject="${{ github.event.client_payload.path }}"
+          echo "CloudEvent subject: ${streamx_subject}"
+          echo "streamx_subject=${streamx_subject}" >> "$GITHUB_OUTPUT"
+
+      - name: Run unpublish web-resource from StreamX
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 3000
+        with:
+          event-type: 'com.streamx.blueprints.web-resource.unpublished.v1'
+          subject: ${{ steps.vars.outputs.streamx_subject }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+          snapshot-artifactory-token: ${{ steps.auth.outputs.access_token }}

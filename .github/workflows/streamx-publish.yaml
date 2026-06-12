@@ -1,0 +1,102 @@
+name: Publish to StreamX
+
+on:
+  repository_dispatch:
+    types:
+      - resource-published
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-event-status:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          echo $CLIENT_PAYLOAD
+          echo "Status: ${{ github.event.client_payload.status }}"
+          echo "Path: ${{ github.event.client_payload.path }}"
+
+  publish-to-streamx:
+    if: (github.event.client_payload.status == 200 || github.event.client_payload.status == 204) && endsWith(github.event.client_payload.path, '.md')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare ingestion variables
+        id: vars
+        shell: bash
+        run: |
+          sleep 1s
+          streamx_subject=$(echo "${{ github.event.client_payload.path }}" | sed 's/\.md$//g')
+          page_path=$(echo "${{ github.event.client_payload.path }}" | sed 's/\.md$//g' | sed 's/index//g')
+          eds_page_url="${{ vars.EDS_DOMAIN_URL }}$page_path"
+          eds_plain_page_url="${{ vars.EDS_DOMAIN_URL }}$streamx_subject.plain.html"
+          echo "Page URL: $eds_page_url"
+          echo "CloudEvent subject: ${streamx_subject}"
+          echo "Plain page URL: $eds_plain_page_url"
+          echo "CloudEvent subject plain: $streamx_subject.plain.html"
+          echo "streamx_subject=${streamx_subject}" >> "$GITHUB_OUTPUT"
+          echo "eds_page_url=$eds_page_url" >> "$GITHUB_OUTPUT"
+          echo "streamx_subject_plain=$streamx_subject.plain.html" >> "$GITHUB_OUTPUT"
+          echo "eds_plain_page_url=$eds_plain_page_url" >> "$GITHUB_OUTPUT"
+
+      - name: Run publish to StreamX
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 30000
+          STREAMX_CONNECTION_TIMEOUT: 3000
+        with:
+          source-provider: ExternalSourceProvider
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          event-type: 'com.streamx.blueprints.page.published.v1'
+          event-data: '{"type": "page/eds"}'
+          external-resource-url: ${{ steps.vars.outputs.eds_page_url }}
+          subject: ${{ steps.vars.outputs.streamx_subject }}
+
+      - name: Run publish plain nav/footer to StreamX
+        if: (endsWith(steps.vars.outputs.streamx_subject_plain, 'nav.plain.html') || endsWith(steps.vars.outputs.streamx_subject_plain, 'footer.plain.html'))
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 30000
+          STREAMX_CONNECTION_TIMEOUT: 3000
+        with:
+          source-provider: ExternalSourceProvider
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          event-type: 'com.streamx.blueprints.web-resource.published.v1'
+          event-data: '{"type": "web-resource/static"}'
+          external-resource-url: ${{ steps.vars.outputs.eds_plain_page_url }}
+          subject: ${{ steps.vars.outputs.streamx_subject_plain }}
+
+
+  publish-json-web-resources-to-streamx:
+    if: (github.event.client_payload.status == 200 || github.event.client_payload.status == 204) && endsWith(github.event.client_payload.path, '.json')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare ingestion variables
+        id: vars
+        shell: bash
+        run: |
+          sleep 1s
+          streamx_subject="${{ github.event.client_payload.path }}"
+          eds_webresource_url="${{ vars.EDS_DOMAIN_URL }}$streamx_subject"
+          echo "Web resource URL: ${eds_webresource_url}"
+          echo "CloudEvent subject: ${streamx_subject}"
+          echo "streamx_subject=${streamx_subject}" >> "$GITHUB_OUTPUT"
+          echo "eds_webresource_url=$eds_webresource_url" >> "$GITHUB_OUTPUT"
+
+      - name: Run publish web-resource to StreamX
+        uses: streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+        env:
+          STREAMX_CONNECTION_SOCKET_TIMEOUT: 3000
+        with:
+          source-provider: ExternalSourceProvider
+          streamx-ingestion-url: ${{ vars.STREAMX_INGESTION_URL }}
+          streamx-ingestion-token: ${{ secrets.STREAMX_INGESTION_GH_TOKEN }}
+          event-type: 'com.streamx.blueprints.web-resource.published.v1'
+          event-data: '{"type": "web-resource/static"}'
+          external-resource-url: ${{ steps.vars.outputs.eds_webresource_url }}
+          subject: ${{ steps.vars.outputs.streamx_subject }}
