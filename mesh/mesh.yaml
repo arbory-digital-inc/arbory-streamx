@@ -100,18 +100,6 @@ ingestion:
           STREAMX_SOURCES_EDS_ACCEPT_IAT_FROM: "1704067200"
 
 processing:
-  pages-relay:
-    descriptor: relay
-    containers:
-      service:
-        incoming:
-          events:
-            ref: relay.pages
-        outgoing:
-          relayed-events:
-            ref: outbox.pages
-
-
   indexable-resources-producer:
     descriptor: indexable-resources-producer
     containers:
