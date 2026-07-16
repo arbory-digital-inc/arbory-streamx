@@ -17,7 +17,7 @@ descriptors:
     type: processing
     containers:
       processor:
-        image: ghcr.io/streamx-com/streamx-blueprints/indexable-resources-producer:3.0.20-native
+        image: ghcr.io/streamx-com/streamx-blueprints/indexable-resources-producer:3.0.21-native
         incoming:
           pages: {}
           fragments: {}
