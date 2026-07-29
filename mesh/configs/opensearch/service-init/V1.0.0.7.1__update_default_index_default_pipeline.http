@@ -1,0 +1,23 @@
+PUT /_ingest/pipeline/default-local
+
+{
+  "description": "Default ingest pipeline used for default",
+  "processors": [
+    {
+      "script": {
+        "description": "Set current date to ingested field",
+        "lang": "painless",
+        "ignore_failure": true,
+        "source": "String pattern = \"yyyy-MM-dd'T'HH:mm:ss.SSSZ\"; SimpleDateFormat simpleDateFormat = new SimpleDateFormat(pattern); ctx[\"payload\"][\"ingested\"] = simpleDateFormat.format(new Date());"
+      }
+    },
+    {
+      "script": {
+        "description": "Expand payload.facets.searchtags into category_level0/1 and category_hierarchy",
+        "lang": "painless",
+        "ignore_failure": true,
+        "source": "if (ctx.payload == null) {\n  return;\n}\ndef facets = ctx.payload.facets;\nif (facets == null) {\n  return;\n}\ndef raw = facets.searchtags;\nif (raw == null) {\n  return;\n}\n\nString source;\nif (raw instanceof List) {\n  StringBuilder joined = new StringBuilder();\n  for (def part : (List) raw) {\n    if (joined.length() > 0) {\n      joined.append(',');\n    }\n    joined.append(part);\n  }\n  source = joined.toString();\n} else {\n  source = raw.toString();\n}\n\nList entries = new ArrayList();\nfor (String fragment : source.splitOnToken(',')) {\n  if (entries.isEmpty() || fragment.indexOf('|') >= 0) {\n    entries.add(fragment);\n  } else {\n    int last = entries.size() - 1;\n    entries.set(last, (String) entries.get(last) + ',' + fragment);\n  }\n}\n\nList groups = new ArrayList();\nList values = new ArrayList();\nList hierarchy = new ArrayList();\n\nfor (String entry : entries) {\n  int bar = entry.indexOf('|');\n  if (bar < 0) {\n    continue;\n  }\n  String path = entry.substring(bar + 1).trim();\n  int slash = path.indexOf(' / ');\n  if (slash < 0) {\n    continue;\n  }\n  String group = path.substring(0, slash).trim();\n  String leaf = path.substring(slash + 3).trim();\n  if (group.length() == 0 || leaf.length() == 0) {\n    continue;\n  }\n  if (!groups.contains(group)) {\n    groups.add(group);\n  }\n  if (!values.contains(leaf)) {\n    values.add(leaf);\n  }\n  if (!hierarchy.contains(group)) {\n    hierarchy.add(group);\n  }\n  String nested = group + '>' + leaf;\n  if (!hierarchy.contains(nested)) {\n    hierarchy.add(nested);\n  }\n}\n\nif (!groups.isEmpty()) {\n  facets.category_level0 = groups;\n  facets.category_level1 = values;\n  facets.category_hierarchy = hierarchy;\n}"
+      }
+    }
+  ]
+}
