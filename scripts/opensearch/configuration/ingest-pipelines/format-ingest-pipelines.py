@@ -19,8 +19,8 @@ import re
 HERE = pathlib.Path(__file__).resolve().parent
 SERVICE_INIT = HERE.parent.parent.parent.parent / "mesh/configs/opensearch/service-init"
 PREVIOUS = SERVICE_INIT / "V1.0.0.6.2__update_default_index_default_pipeline.http"
-OUTPUT = SERVICE_INIT / "V1.0.0.7.2__update_default_index_default_pipeline.http"
-PAINLESS = HERE / "V1.0.0.7.2__parse_searchtags.painless"
+OUTPUT = SERVICE_INIT / "V1.0.0.7.3__update_default_index_default_pipeline.http"
+PAINLESS = HERE / "V1.0.0.7.3__parse_searchtags.painless"
 
 
 def load_previous_processors():

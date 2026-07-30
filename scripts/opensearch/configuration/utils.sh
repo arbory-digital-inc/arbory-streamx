@@ -16,7 +16,11 @@ format_search_template() {
     echo "$SCRIPT"
     echo "--------------------------"
 
-    OUTPUT_FILE="../../service-init/$1.http"
+    # Resolve from the repo root: the templates live under scripts/ while the
+    # generated migrations belong to the mesh config, so a path relative to the
+    # caller's directory silently wrote nothing.
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    OUTPUT_FILE="$REPO_ROOT/mesh/configs/opensearch/service-init/$1.http"
 
     echo "$SCRIPT" > "$OUTPUT_FILE"
 
