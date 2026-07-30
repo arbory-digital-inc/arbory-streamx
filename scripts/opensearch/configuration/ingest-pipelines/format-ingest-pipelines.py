@@ -3,8 +3,11 @@
 
 `PUT /_ingest/pipeline/...` replaces the whole pipeline, so every processor has
 to be present in the generated file. The existing "ingested" date processor is
-lifted verbatim out of the previous migration rather than retyped, so it cannot
-drift.
+lifted verbatim out of V1.0.0.6.2 rather than retyped, so it cannot drift.
+
+Each revision of the script ships as a NEW migration. Editing one that has already
+been applied is not a way to change the pipeline: the runner validates applied
+migrations and will refuse to start rather than re-run them.
 
 Run from this directory:
     python3 format-ingest-pipelines.py
@@ -16,8 +19,8 @@ import re
 HERE = pathlib.Path(__file__).resolve().parent
 SERVICE_INIT = HERE.parent.parent.parent.parent / "mesh/configs/opensearch/service-init"
 PREVIOUS = SERVICE_INIT / "V1.0.0.6.2__update_default_index_default_pipeline.http"
-OUTPUT = SERVICE_INIT / "V1.0.0.7.1__update_default_index_default_pipeline.http"
-PAINLESS = HERE / "V1.0.0.7.1__parse_searchtags.painless"
+OUTPUT = SERVICE_INIT / "V1.0.0.7.2__update_default_index_default_pipeline.http"
+PAINLESS = HERE / "V1.0.0.7.2__parse_searchtags.painless"
 
 
 def load_previous_processors():

@@ -9,14 +9,26 @@
 //
 // which yields:
 //
-//   category_level0    ["Content type", "tags", "Category"]
-//   category_level1    ["Blogs", "AEM", "ci/cd", "AEM News"]
-//   category_hierarchy ["Content type", "Content type>Blogs",
-//                       "tags", "tags>AEM", "tags>ci/cd",
-//                       "Category", "Category>AEM News"]
+//   category_level0    ["Blogs", "AEM", "ci/cd", "AEM News"]
+//   category_hierarchy ["Blogs", "AEM", "ci/cd", "AEM News",
+//                       "Content type>Blogs", "tags>AEM",
+//                       "tags>ci/cd", "Category>AEM News"]
 //
 // Arrays are the point: one meta tag can only carry one string, so splitting has
 // to happen here for a page to appear under more than one facet value.
+//
+// The facet is deliberately FLAT - the leaf values go in category_level0 and no
+// category_level1 is written. OpenSearch cannot correlate positions across two
+// independent arrays, so nesting a level1 terms agg under a level0 bucket returns
+// every level1 value of the matching documents rather than only that group's
+// children: 'Content type' would list AEM, Versions and CQ5 beneath it. A
+// level-per-group layout only behaves when each level holds a single value per
+// document, which is not the case here.
+//
+// category_hierarchy is the filter field (facetFilterField), never aggregated, so
+// it carries both the bare leaves - which is what a flat selection filters on -
+// and the group>leaf paths, keeping the grouping available for a future
+// multi-family facet layout.
 //
 // String literals are single-quoted so the source survives JSON embedding, and
 // no regex is used because painless regexes are disabled by default.
@@ -87,8 +99,9 @@ for (String entry : entries) {
   if (!values.contains(leaf)) {
     values.add(leaf);
   }
-  if (!hierarchy.contains(group)) {
-    hierarchy.add(group);
+  // Bare leaf first: a flat facet selection filters on exactly this.
+  if (!hierarchy.contains(leaf)) {
+    hierarchy.add(leaf);
   }
   String nested = group + '>' + leaf;
   if (!hierarchy.contains(nested)) {
@@ -96,8 +109,7 @@ for (String entry : entries) {
   }
 }
 
-if (!groups.isEmpty()) {
-  facets.category_level0 = groups;
-  facets.category_level1 = values;
+if (!values.isEmpty()) {
+  facets.category_level0 = values;
   facets.category_hierarchy = hierarchy;
 }
