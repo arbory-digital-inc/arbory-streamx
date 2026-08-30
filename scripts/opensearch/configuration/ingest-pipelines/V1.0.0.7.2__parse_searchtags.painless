@@ -1,0 +1,115 @@
+// Expands the flattened `searchtags` taxonomy into the facet fields the search
+// UI aggregates and filters on.
+//
+// The producer copies `<meta name="searchtags">` verbatim into
+// payload.facets.searchtags as a single string, e.g.
+//
+//   Arbory Display | Content type / Blogs, Arbory Display | tags / AEM,
+//   Arbory Display | tags / ci/cd, Arbory Display | Category / AEM News
+//
+// which yields:
+//
+//   category_level0    ["Blogs", "AEM", "ci/cd", "AEM News"]
+//   category_hierarchy ["Blogs", "AEM", "ci/cd", "AEM News",
+//                       "Content type>Blogs", "tags>AEM",
+//                       "tags>ci/cd", "Category>AEM News"]
+//
+// Arrays are the point: one meta tag can only carry one string, so splitting has
+// to happen here for a page to appear under more than one facet value.
+//
+// The facet is deliberately FLAT - the leaf values go in category_level0 and no
+// category_level1 is written. OpenSearch cannot correlate positions across two
+// independent arrays, so nesting a level1 terms agg under a level0 bucket returns
+// every level1 value of the matching documents rather than only that group's
+// children: 'Content type' would list AEM, Versions and CQ5 beneath it. A
+// level-per-group layout only behaves when each level holds a single value per
+// document, which is not the case here.
+//
+// category_hierarchy is the filter field (facetFilterField), never aggregated, so
+// it carries both the bare leaves - which is what a flat selection filters on -
+// and the group>leaf paths, keeping the grouping available for a future
+// multi-family facet layout.
+//
+// String literals are single-quoted so the source survives JSON embedding, and
+// no regex is used because painless regexes are disabled by default.
+if (ctx.payload == null) {
+  return;
+}
+def facets = ctx.payload.facets;
+if (facets == null) {
+  return;
+}
+def raw = facets.searchtags;
+if (raw == null) {
+  return;
+}
+
+String source;
+if (raw instanceof List) {
+  StringBuilder joined = new StringBuilder();
+  for (def part : (List) raw) {
+    if (joined.length() > 0) {
+      joined.append(',');
+    }
+    joined.append(part);
+  }
+  source = joined.toString();
+} else {
+  source = raw.toString();
+}
+
+// A comma only starts a new entry when the fragment after it carries the
+// '<namespace> | <group> / <value>' shape. Fragments with no '|' are a comma
+// that belongs inside the previous entry's value.
+List entries = new ArrayList();
+for (String fragment : source.splitOnToken(',')) {
+  if (entries.isEmpty() || fragment.indexOf('|') >= 0) {
+    entries.add(fragment);
+  } else {
+    int last = entries.size() - 1;
+    // Cast before concatenating: List elements are untyped here, and painless
+    // resolves def + String at runtime rather than as string concatenation.
+    entries.set(last, (String) entries.get(last) + ',' + fragment);
+  }
+}
+
+List groups = new ArrayList();
+List values = new ArrayList();
+List hierarchy = new ArrayList();
+
+for (String entry : entries) {
+  int bar = entry.indexOf('|');
+  if (bar < 0) {
+    continue;
+  }
+  String path = entry.substring(bar + 1).trim();
+  // First ' / ' only, so a value like 'ci/cd' stays intact.
+  int slash = path.indexOf(' / ');
+  if (slash < 0) {
+    continue;
+  }
+  String group = path.substring(0, slash).trim();
+  String leaf = path.substring(slash + 3).trim();
+  if (group.length() == 0 || leaf.length() == 0) {
+    continue;
+  }
+  if (!groups.contains(group)) {
+    groups.add(group);
+  }
+  if (!values.contains(leaf)) {
+    values.add(leaf);
+  }
+  // Bare leaf first: a flat facet selection filters on exactly this.
+  if (!hierarchy.contains(leaf)) {
+    hierarchy.add(leaf);
+  }
+  String nested = group + '>' + leaf;
+  if (!hierarchy.contains(nested)) {
+    hierarchy.add(nested);
+  }
+}
+
+if (!values.isEmpty()) {
+  facets.category_level0 = values;
+  facets.category_hierarchy = hierarchy;
+}
