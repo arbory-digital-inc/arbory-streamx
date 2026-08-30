@@ -1,0 +1,5 @@
+clusters:
+  eu-west-par-edge:
+    enabled: true
+  eu-west-par-processing:
+    enabled: true
