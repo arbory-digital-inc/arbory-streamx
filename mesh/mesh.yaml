@@ -17,13 +17,65 @@ descriptors:
     type: processing
     containers:
       processor:
-        image: ghcr.io/streamx-com/streamx-blueprints/indexable-resources-producer:3.0.22-native
+        image: ghcr.io/streamx-hub/streamx-blueprints/indexable-resources-producer:3.0.27-native
         incoming:
           pages: {}
           fragments: {}
         outgoing:
           indexable-resources: {}
           indexable-resource-fragments: {}
+
+  indexable-resources-sql-transformer:
+    type: processing
+    volumes:
+      sqlitedb:
+        size: 5Gi
+    containers:
+      processor:
+        image: ghcr.io/streamx-hub/streamx-blueprints/indexable-resources-sql-transformer:3.0.27-native
+        incoming:
+          indexable-resources: { }
+        outgoing:
+          transformations: { }
+        autoRef:
+          - from: indexable-resources
+            to: indexable-resources-state
+            using: sync-state
+        volumes:
+          - sqlitedb:/var/lib/sqlitedb
+        environment:
+          STREAMX_BLUEPRINTS_SQL_STATE_REPOSITORY_SQLITE_PATH: /var/lib/sqlitedb
+
+  rendering-engine:
+    type: processing
+    volumes:
+      rocksdb:
+        size: 5Gi
+    containers:
+      processor:
+        image: ghcr.io/streamx-hub/streamx-blueprints/rendering-engine:3.0.27-native
+        incoming:
+          data: { }
+          renderers: { }
+          rendering-contexts: { }
+        outgoing:
+          pages: { }
+          fragments: { }
+        autoRef:
+          - from: outgoing-rendering-requests
+            to: incoming-rendering-requests
+            using: internal-relay
+          - from: data
+            to: data-state
+            using: sync-state
+          - from: renderers
+            to: renderers-state
+            using: sync-state
+          - from: rendering-contexts
+            to: rendering-contexts-state
+            using: sync-state
+        volumes:
+          - rocksdb:/var/lib/rocksdb
 
   opensearch-sink:
     type: edge
@@ -36,7 +88,7 @@ descriptors:
         persistent: true
     containers:
       sink:
-        image: ghcr.io/streamx-com/streamx-blueprints/opensearch-sink:3.0.22-native
+        image: ghcr.io/streamx-hub/streamx-blueprints/opensearch-sink:3.0.27-native
         incoming:
           indexable-resources:
             initState: delta
@@ -61,6 +113,31 @@ descriptors:
           discovery.type: single-node
           DISABLE_SECURITY_PLUGIN: "true"
 
+  web-server-sink:
+    type: edge
+    volumes:
+      repository-volume:
+        size: 20Gi
+        persistent: true
+    containers:
+      sink:
+        image: ghcr.io/streamx-hub/streamx-blueprints/web-server-sink:3.0.27-native
+        incoming:
+          resources:
+            initState: delta
+        servicePorts:
+          - 8083:8080
+        volumes:
+          - repository-volume:/srv/www
+        environment:
+          STREAMX_BLUEPRINTS_WEB_SERVER_SINK_STORAGE_ROOT_DIRECTORY: /srv/www
+      webserver:
+        image: registry.prod-ext.streamx.cloud/streamx-docker-hub-public-proxy/library/nginx:1.26.0
+        servicePorts:
+          - 8084:80
+        volumes:
+          - repository-volume:/usr/share/nginx/html
+
 networking:
   httpRoutes:
     ingestion-route:
@@ -72,7 +149,7 @@ networking:
           backendRefs:
             - name: ingestion/rest-ingestion
               port: 8080
-    search-route:
+    web-server-and-search-route:
       rules:
         - matches:
             - path:
@@ -81,6 +158,13 @@ networking:
           backendRefs:
             - name: edge/opensearch-sink
               port: 8082
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          backendRefs:
+            - name: edge/web-server-sink
+              port: 8084
 
 sources:
   github:
@@ -89,6 +173,14 @@ sources:
         produces:
           - com.streamx.blueprints.page.published.v1
           - com.streamx.blueprints.page.unpublished.v1
+      - ref: inbox.renderers
+        produces:
+          - com.streamx.blueprints.renderer.published.v1
+          - com.streamx.blueprints.renderer.unpublished.v1
+      - ref: inbox.rendering-contexts
+        produces:
+          - com.streamx.blueprints.rendering-context.published.v1
+          - com.streamx.blueprints.rendering-context.unpublished.v1
 
 ingestion:
   rest-ingestion:
@@ -108,15 +200,46 @@ processing:
           pages:
             ref: inbox.pages
           fragments:
-            ref: inbox.fragments
+            ref: relay.fragments
         outgoing:
           indexable-resources:
-            ref: outbox.indexable-resources
+            ref: relay.indexable-resources
           indexable-resource-fragments:
             ref: outbox.indexable-resource-fragments
         environmentFrom:
           configs:
             - indexable-resources-producer.properties
+
+  indexable-resources-sql-transformer:
+    descriptor: indexable-resources-sql-transformer
+    containers:
+      processor:
+        incoming:
+          indexable-resources:
+            ref: relay.indexable-resources
+        outgoing:
+          transformations:
+            ref: relay.data
+        environmentFrom:
+          configs:
+            - indexable-resources-sql-transformer.properties
+
+  rendering-engine:
+    descriptor: rendering-engine
+    containers:
+      processor:
+        incoming:
+          data:
+            ref: relay.data
+          renderers:
+            ref: inbox.renderers
+          rendering-contexts:
+            ref: inbox.rendering-contexts
+        outgoing:
+          pages:
+            ref: outbox.web-resources
+          fragments:
+            ref: outbox.fragments
 
 edge:
   opensearch-sink:
@@ -125,7 +248,7 @@ edge:
       sink:
         incoming:
           indexable-resources:
-            ref: outbox.indexable-resources
+            ref: relay.indexable-resources
           indexable-resource-fragments:
             ref: outbox.indexable-resource-fragments
         volumesFrom:
@@ -139,3 +262,19 @@ edge:
         environmentFrom:
           secrets:
             - encrypted/opensearch-sink-opensearch.properties
+
+  web-server-sink:
+    descriptor: web-server-sink
+    containers:
+      sink:
+        incoming:
+          resources:
+            ref: outbox.web-resources
+        environmentFrom:
+          configs:
+            - web-server-sink.properties
+
+      webserver:
+        volumesFrom:
+          configs:
+            - nginx_conf/default.conf:/etc/nginx/conf.d/default.conf
