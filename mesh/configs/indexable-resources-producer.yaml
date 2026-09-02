@@ -1,0 +1,42 @@
+streamx:
+  blueprints:
+    indexable-resources-producer:
+      index-fragments: false
+
+      search-feed-extractor:
+        xpath:
+          fields:
+            eds:
+              facet: true
+              element-selector: "//*[local-name()='meta'][starts-with(@property, 'facets:')]"
+              key-selector: "./@property"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+                - name: removeStart
+                  config: "facets:"
+              value-processors:
+                - name: trim
+
+            # RSM-style taxonomy. EDS renders the authored `searchtags` metadata row as a
+            # single <meta name="searchtags"> whose content holds every entry, comma-joined:
+            #   Arbory Display | Content type / Blogs, Arbory Display | tags / AEM, ...
+            # The `eds` configuration above cannot pick it up - that selector requires a
+            # `facets:` prefix - so capture it here under the key `searchtags`. It lands in
+            # payload.facets.searchtags as one opaque string and is split into
+            # category_level0/1 + category_hierarchy by the default-local ingest pipeline
+            # (see mesh/configs/opensearch/service-init/V1.0.0.7.1__*_default_pipeline.http),
+            # because a single meta tag cannot carry the array that multi-value faceting
+            # needs.
+            searchtags:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@name='searchtags']"
+              key: "searchtags"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+

@@ -1,0 +1,11 @@
+streamx:
+  blueprints:
+    indexable-resources-sql-transformer:
+      persisted-data:
+        include-content: false
+        fields: url,author,description,publication_date,modification_date
+        facets: category
+
+      transformations:
+        latest-articles-rss:
+          sql-query: "SELECT r.* FROM indexable_resource r LEFT JOIN indexable_resource_fields f ON f.resource_subject = r.subject AND f.key = 'publication_date' ORDER BY f.value IS NULL, f.value DESC"
