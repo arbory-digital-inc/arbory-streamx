@@ -1,0 +1,194 @@
+# StreamX GitHub connector — internalized copy.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Upstream lives at
+#   streamx-hub/streamx-common-github-actions/.github/actions/connector-github@v1
+# and calling it directly fails in an org whose actions allow-list is set to
+# "enterprise-owned + GitHub-authored + Marketplace-verified":
+#
+#   The action streamx-hub/streamx-common-github-actions/.github/actions/
+#   connector-github@v1 is not allowed in <org>/<repo> because all actions must
+#   be from a repository owned by your enterprise, created by GitHub, or
+#   verified in the GitHub Marketplace.
+#
+# So the action is vendored into a repository we own. Every step below is either
+# plain bash or an action from the GitHub-authored `actions/*` org, which the
+# policy permits. Nothing here reaches for a third-party action — that is the
+# whole point, and it is the one property that must survive every future edit.
+#
+# INPUT SURFACE IS DELIBERATELY IDENTICAL TO UPSTREAM
+# ---------------------------------------------------
+# Do not add inputs. `${{ toJSON(inputs) }}` is handed to the connector as
+# JSON_INPUTS, so any input declared here lands in the connector's config
+# whether it belongs there or not. Knobs that are ours rather than the
+# connector's are pinned as step-level `env:` literals instead — see PINS.
+#
+# PINS (bump these together; .github/workflows/verify-connector-action.yaml
+# fails the build if the two connector-version copies drift apart)
+#   JBANG_VERSION / JBANG_SHA256 .... "Install JBang" step
+#   connector version .............. "Restore the Maven cache" key AND the
+#                                    `jbang ... com.streamx:...:<version>` line
+#
+# Provenance, the upstream diff and the bump procedure: see README.md.
+name: 'streamx-github-connector'
+description: >-
+  Sync GitHub changes with StreamX by sending CloudEvents to a StreamX ingestion
+  endpoint. Internalized, third-party-action-free copy of the upstream StreamX
+  connector action.
+
+inputs:
+  streamx-ingestion-url:
+    description: 'StreamX ingestion API endpoint URL (e.g., https://ingestion.streamx.com).'
+    required: true
+  streamx-ingestion-token:
+    description: 'StreamX ingestion API authorisation token.'
+    required: false
+  event-type:
+    description: 'CloudEvents event type (e.g., com.streamx.blueprints.web-resource.published.v1).'
+    required: true
+  deleted-event-type:
+    description: 'CloudEvents event type used for deletion events (e.g., com.streamx.blueprints.web-resource.unpublished.v1).'
+    required: false
+  event-data:
+    description: 'Additional JSON fields to include in the CloudEvent data object (e.g., {"type": "web-resource/static"}).'
+    required: false
+  source-provider:
+    description: 'Specifies the provider name used to determine the ingestion data source.'
+    required: false
+  workspace:
+    description: 'Specifies the root directory for ingestion data lookup. Defaults to github.workspace.'
+    required: false
+  subject:
+    description: 'CloudEvents subject. Alternative to source-provider for simple single-event ingestion.'
+    required: false
+  include-patterns:
+    description: 'Defines Ant-style path patterns for filtering ingestion data (e.g., styles/*.css, scripts/*.js).'
+    required: false
+  external-resource-url:
+    description: 'URL property from where resource data is downloaded and used as ingestion data.'
+    required: false
+  debug-enabled:
+    description: 'Configuration property to enable debug log level in GitHub Actions.'
+    required: false
+    default: 'false'
+  snapshot-artifactory-token:
+    description: 'StreamX artifactory token for SNAPSHOT usage only'
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download streamx-github-connector snapshot dependency
+      if: inputs.snapshot-artifactory-token != ''
+      shell: bash
+      run: |
+        if [ -f ~/.m2/settings.xml ]; then
+          if ! grep -q '<id>streamx-maven-snapshots</id>' ~/.m2/settings.xml; then
+            sed -i.bak 's@</servers>@<server><id>streamx-maven-snapshots</id><username>oauth2accesstoken</username><password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password></server></servers>@' ~/.m2/settings.xml
+          fi
+        else
+          mkdir -p ~/.m2/
+          cat <<\EOF > ~/.m2/settings.xml
+        <?xml version="1.0"?>
+        <settings>
+          <servers>
+            <server>
+              <id>streamx-maven-snapshots</id>
+              <username>oauth2accesstoken</username>
+              <password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+        fi
+
+    # GitHub-authored action: permitted by the allow-list.
+    #
+    # Upstream v1 pins setup-java@v3 with distribution 'adopt'; both are
+    # deprecated and every run of the upstream action emits two warnings for it.
+    # Upstream's own v2 branch has already moved to 'temurin'. `java-version`
+    # has to stay 21 — the connector is built for it.
+    - name: Set up Java 21
+      uses: actions/setup-java@v6
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    # GitHub-authored action: permitted by the allow-list.
+    #
+    # Upstream keys this cache on hashFiles('.jbang/cache/dependency_cache.json'),
+    # a path that only exists under $HOME, never in the consuming repository's
+    # workspace — so hashFiles always returns empty and the key is a constant.
+    # Naming the connector version makes the constant honest: a version bump
+    # gets its own cache instead of silently reusing the previous version's.
+    - name: Restore the Maven cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-streamx-connector-2.0.0
+        restore-keys: |
+          ${{ runner.os }}-m2-streamx-connector-
+
+    # Upstream uses jbangdev/setup-jbang@main here. That is the one reference the
+    # allow-list rejects, and it is also the only step that cannot simply be
+    # re-pointed at an `actions/*` equivalent — so it is reimplemented in bash.
+    # setup-jbang runs `curl -Ls https://sh.jbang.dev | bash -s - app setup`,
+    # which pipes an unpinned remote script into a shell and then downloads
+    # whatever release is current. install-jbang.sh fetches one pinned release
+    # asset and refuses to continue unless it matches a known SHA-256.
+    - name: Install JBang
+      shell: bash
+      env:
+        JBANG_VERSION: '0.141.0'
+        JBANG_SHA256: '0de5bb29a23159a6afc6f40dd510fbad05685827288ba7727c49d500719d0f92'
+      run: bash "${{ github.action_path }}/install-jbang.sh"
+
+    # Point JBang at the JDK setup-java just installed, so `jbang --java 21`
+    # is satisfied locally instead of downloading a second ~200MB JDK.
+    #
+    # Upstream v1 hardcodes ${{ env.JAVA_HOME_21_X64 }}, which is set only by
+    # setup-java on an x64 runner; on arm64, or on a self-hosted runner with a
+    # pre-provisioned JDK, it is empty and `jbang jdk install` gets no path.
+    # $JAVA_HOME is set in every one of those cases. (Upstream v2 drops this
+    # step entirely and pays for the JDK download.)
+    - name: Register the JDK with JBang
+      shell: bash
+      run: |
+        set -euo pipefail
+        jdk_home="${JAVA_HOME_21_X64:-${JAVA_HOME:-}}"
+        if [ -z "$jdk_home" ]; then
+          echo "::warning::Neither JAVA_HOME_21_X64 nor JAVA_HOME is set; JBang will download its own JDK 21."
+          exit 0
+        fi
+        echo "Linking JBang JDK 21 to $jdk_home"
+        jbang jdk install 21 "$jdk_home"
+
+    - name: Run the action
+      id: action
+      shell: bash
+      env:
+        JSON_INPUTS: ${{ toJSON(inputs) }}
+        SNAPSHOT_ARTIFACTORY_TOKEN: ${{ inputs.snapshot-artifactory-token }}
+      run: |
+        if [[ "${{ inputs.debug-enabled }}" == "true" ]]; then
+          export JDK_JAVA_OPTIONS="-Dquarkus.profile=debug";
+        fi
+        output_filename="result_${{github.run_id}}.txt";
+        if [ -f "$output_filename" ]; then
+          rm "$output_filename";
+        fi
+        jbang_exit=0
+        jbang --java 21 --fresh --repos 'streamx-maven-public-releases=https://europe-west1-maven.pkg.dev/streamx-releases/streamx-maven-public-releases/' --repos 'mavencentral' --repos 'streamx-maven-snapshots=https://europe-west1-maven.pkg.dev/streamx-releases/streamx-maven-snapshots/' com.streamx:streamx-github-connector:2.0.0 &> "$output_filename" || jbang_exit=$?
+
+        errorsCount=$(grep -oi "::error" "$output_filename" 2>/dev/null | wc -l) || true
+
+        echo "-------------------------------------";
+        echo "Execution result (exit code: ${jbang_exit}, errors: ${errorsCount// /}):";
+        echo "-------------------------------------";
+        sed 's/^::/  ::/g' "$output_filename";
+
+        rm "$output_filename";
+        if [ "$jbang_exit" -ne 0 ] || ((errorsCount > 0)); then
+          exit 1;
+        fi

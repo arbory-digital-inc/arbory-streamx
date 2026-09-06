@@ -1,0 +1,112 @@
+# Keep the internalized StreamX connector action fit for an org with an actions
+# allow-list.
+#
+# The property that matters — "this action references no third-party action" —
+# cannot be observed by running the action. It breaks in the CONSUMING repo, in
+# someone else's org, at publish time. So it is asserted here, in the repo that
+# owns the copy, on every change to it.
+#
+# Note that every step below is bash or an `actions/*` action, exactly like the
+# action it verifies. That is not decoration: this file gets copied into
+# a customer's own StreamX configuration repo alongside the action, and has to
+# run there too.
+name: Verify connector action
+
+on:
+  push:
+    paths:
+      - '.github/actions/connector-github/**'
+      - '.github/workflows/verify-connector-action.yaml'
+      - 'scripts/vendor/**'
+      - 'docs/upstream/**'
+  pull_request:
+    paths:
+      - '.github/actions/connector-github/**'
+      - '.github/workflows/verify-connector-action.yaml'
+      - 'scripts/vendor/**'
+      - 'docs/upstream/**'
+  schedule:
+    # Weekly, to notice upstream moving. `@v1` upstream is a branch, so it can
+    # change with no version bump and nothing else would tell us.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Assert the action is allow-list safe
+        run: bash scripts/vendor/check-allowlist-safety.sh
+
+      - name: Shellcheck the vendoring scripts
+        run: shellcheck scripts/vendor/*.sh
+
+  smoke:
+    name: Smoke test the internalized JBang path
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same version and distribution the action itself uses, because this job
+      # is testing what happens after that step.
+      - uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # Read the pins out of action.yml rather than repeating them, so this
+      # tests the values that actually ship.
+      - name: Read the pinned versions from action.yml
+        id: pins
+        run: |
+          set -euo pipefail
+          action_yml=.github/actions/connector-github/action.yml
+          jbang_version="$(grep -oP "^\s+JBANG_VERSION:\s*'\K[^']+" "$action_yml")"
+          jbang_sha="$(grep -oP "^\s+JBANG_SHA256:\s*'\K[^']+" "$action_yml")"
+          connector="$(grep -oP 'com\.streamx:streamx-github-connector:\K[0-9][^ ]*' "$action_yml" | head -1)"
+          echo "jbang_version=${jbang_version}" >> "$GITHUB_OUTPUT"
+          echo "jbang_sha=${jbang_sha}" >> "$GITHUB_OUTPUT"
+          echo "connector=${connector}" >> "$GITHUB_OUTPUT"
+          echo "JBang ${jbang_version}, connector ${connector}"
+
+      - name: Install JBang from the pinned, checksummed release
+        env:
+          JBANG_VERSION: ${{ steps.pins.outputs.jbang_version }}
+          JBANG_SHA256: ${{ steps.pins.outputs.jbang_sha }}
+        run: bash .github/actions/connector-github/install-jbang.sh
+
+      - name: Register the JDK with JBang
+        run: jbang jdk install 21 "${JAVA_HOME_21_X64:-$JAVA_HOME}"
+
+      # Resolution is the part that can break without anyone noticing: it
+      # reaches a third-party Maven registry over the network. `info classpath`
+      # resolves the artifact and all its transitive dependencies and prints the
+      # result WITHOUT running the connector, so no CloudEvent is ever sent.
+      - name: Resolve the connector artifact
+        run: |
+          set -euo pipefail
+          jbang info classpath \
+            --fresh \
+            --repos 'streamx-maven-public-releases=https://europe-west1-maven.pkg.dev/streamx-releases/streamx-maven-public-releases/' \
+            --repos 'mavencentral' \
+            'com.streamx:streamx-github-connector:${{ steps.pins.outputs.connector }}' \
+            | tee classpath.txt
+          if ! grep -q 'streamx-github-connector' classpath.txt; then
+            echo "::error::the resolved classpath does not contain the connector jar"
+            exit 1
+          fi
+          echo "Resolved $(tr ':' '\n' < classpath.txt | grep -c '\.jar$' || true) jars."
+
+  upstream-drift:
+    name: Upstream drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare upstream v1/v2 against the recorded snapshots
+        run: bash scripts/vendor/check-upstream-drift.sh

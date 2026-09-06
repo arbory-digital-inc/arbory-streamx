@@ -1,0 +1,112 @@
+name: 'streamx-github-connector'
+inputs:
+  streamx-ingestion-url:
+    description: 'StreamX ingestion API endpoint URL (e.g., https://ingestion.streamx.com).'
+    required: true
+  streamx-ingestion-token:
+    description: 'StreamX ingestion API authorisation token.'
+    required: false
+  event-type:
+    description: 'CloudEvents event type (e.g., com.streamx.blueprints.web-resource.published.v1).'
+    required: true
+  deleted-event-type:
+    description: 'CloudEvents event type used for deletion events (e.g., com.streamx.blueprints.web-resource.unpublished.v1).'
+    required: false
+  event-data:
+    description: 'Additional JSON fields to include in the CloudEvent data object (e.g., {"type": "web-resource/static"}).'
+    required: false
+  source-provider:
+    description: 'Specifies the provider name used to determine the ingestion data source.'
+    required: false
+  workspace:
+    description: 'Specifies the root directory for ingestion data lookup. Defaults to github.workspace.'
+    required: false
+  subject:
+    description: 'CloudEvents subject. Alternative to source-provider for simple single-event ingestion.'
+    required: false
+  include-patterns:
+    description: 'Defines Ant-style path patterns for filtering ingestion data (e.g., styles/*.css, scripts/*.js).'
+    required: false
+  external-resource-url:
+    description: 'URL property from where resource data is downloaded and used as ingestion data.'
+    required: false
+  debug-enabled:
+    description: 'Configuration property to enable debug log level in GitHub Actions.'
+    required: false
+    default: 'false'
+  snapshot-artifactory-token:
+    description: 'StreamX artifactory token for SNAPSHOT usage only'
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download streamx-github-connector snapshot dependency
+      if: inputs.snapshot-artifactory-token != ''
+      shell: bash
+      run: |
+        if [ -f ~/.m2/settings.xml ]; then
+          if ! grep -q '<id>streamx-maven-snapshots</id>' ~/.m2/settings.xml; then
+            sed -i.bak 's@</servers>@<server><id>streamx-maven-snapshots</id><username>oauth2accesstoken</username><password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password></server></servers>@' ~/.m2/settings.xml
+          fi
+        else
+          mkdir -p ~/.m2/
+          cat <<\EOF > ~/.m2/settings.xml
+        <?xml version="1.0"?>
+        <settings>
+          <servers>
+            <server>
+              <id>streamx-maven-snapshots</id>
+              <username>oauth2accesstoken</username>
+              <password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+        fi
+
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Setup M2 cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-maven-${{ hashFiles('.jbang/cache/dependency_cache.json') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
+
+    - name: Set up JBang
+      uses: jbangdev/setup-jbang@main
+
+    - name: Run the action
+      id: action
+      run: |
+        if [[ "${{ inputs.debug-enabled }}" == "true" ]]; then
+          export JDK_JAVA_OPTIONS="-Dquarkus.profile=debug";
+        fi
+        output_filename="result_${{github.run_id}}.txt";
+        if [ -f "$output_filename" ]; then
+          rm "$output_filename";
+        fi
+        jbang_exit=0
+        jbang --java 21 --fresh --repos 'streamx-maven-public-releases=https://europe-west1-maven.pkg.dev/streamx-releases/streamx-maven-public-releases/' --repos 'mavencentral' --repos 'streamx-maven-snapshots=https://europe-west1-maven.pkg.dev/streamx-releases/streamx-maven-snapshots/' com.streamx:streamx-github-connector:2.0.0 &> "$output_filename" || jbang_exit=$?
+
+        errorsCount=$(grep -oi "::error" "$output_filename" 2>/dev/null | wc -l) || true
+
+        echo "-------------------------------------";
+        echo "Execution result (exit code: ${jbang_exit}, errors: ${errorsCount// /}):";
+        echo "-------------------------------------";
+        sed 's/^::/  ::/g' "$output_filename";
+
+        rm "$output_filename";
+        if [ "$jbang_exit" -ne 0 ] || ((errorsCount > 0)); then
+          exit 1;
+        fi
+      shell: bash
+      env:
+        JSON_INPUTS: ${{ toJSON(inputs) }}
+        SNAPSHOT_ARTIFACTORY_TOKEN: ${{ inputs.snapshot-artifactory-token }}
