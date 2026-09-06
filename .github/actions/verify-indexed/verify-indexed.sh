@@ -64,6 +64,8 @@ timeout_s="${SX_TIMEOUT:-300}"
 interval_s="${SX_INTERVAL:-10}"
 size="${SX_SIZE:-200}"
 max_scan="${SX_MAX_SCAN:-2000}"
+previous_ingested="${SX_PREVIOUS_INGESTED:-}"
+op="${SX_MODE:-verify}"
 
 die() { echo "::error::$*"; exit 1; }
 
@@ -72,6 +74,10 @@ die() { echo "::error::$*"; exit 1; }
 case "$expect" in
   present|absent) ;;
   *) die "SX_EXPECT must be 'present' or 'absent', got '${expect}'." ;;
+esac
+case "$op" in
+  verify|read) ;;
+  *) die "SX_MODE must be 'verify' or 'read', got '${op}'." ;;
 esac
 
 if [ -n "$query" ]; then
@@ -102,6 +108,20 @@ else
   parser=text
 fi
 
+# A 200 response is not automatically a search response. curl follows redirects
+# and only rejects >=400, so an HTML body — a WAF interstitial, a load-balancer
+# maintenance page, an apex domain that redirects to marketing, or simply the
+# EDS host pasted in place of the delivery host — arrives here looking fine. It
+# then parses as zero hits, which SATISFIES an `absent` assertion. The unpublish
+# check would pass against a host that has no search index at all.
+looks_like_search_response() {
+  if [ "$parser" = jq ]; then
+    jq -e 'has("hits") and (.hits | has("total"))' "$1" >/dev/null 2>&1
+  else
+    grep -q '"total":[[:space:]]*{[[:space:]]*"value":[[:space:]]*[0-9]' "$1"
+  fi
+}
+
 ids_from() {
   if [ "$parser" = jq ]; then
     jq -r '.hits.hits[]?._id // empty' "$1"
@@ -109,6 +129,20 @@ ids_from() {
     # On zero hits the response carries no inner "hits" array at all, so this
     # simply produces nothing — which is the correct answer.
     grep -oE '"_id":"[^"]*"' "$1" | sed 's/^"_id":"//; s/"$//'
+  fi
+}
+
+# The index's own freshness stamp. The default ingest pipeline writes
+# payload.ingested on EVERY index operation, so a changed value is proof that
+# this document was really re-indexed — the one signal that separates "the
+# document exists" from "this publish did something". It is only visible if the
+# search template projects it in _source; when it does not, this returns nothing
+# and the caller degrades to an existence check and says so.
+ingested_from() {
+  if [ "$parser" = jq ]; then
+    jq -r --arg s "$subject" '.hits.hits[]? | select(._id == $s) | ._source.payload.ingested // empty' "$1" | head -1
+  else
+    tr ',' '\n' < "$1" | grep -oE '"ingested":"[^"]*"' | sed 's/^"ingested":"//; s/"$//' | head -1
   fi
 }
 
@@ -150,7 +184,12 @@ probe() {
 
   while :; do
     fetch_page "$from" "${stamp}-${from}" || return 1
+    if ! looks_like_search_response "$response"; then
+      bad_response=1
+      return 1
+    fi
     last_total="$(total_from "$response")"
+    ingested="$(ingested_from "$response")"
 
     if ids_from "$response" | grep -Fxq -- "$subject"; then
       hit=1
@@ -158,7 +197,7 @@ probe() {
     fi
 
     local page_count
-    page_count="$(ids_from "$response" | grep -c . || true)"
+    page_count="$(ids_from "$response" | sort -u | grep -c . || true)"
     scanned=$((scanned + page_count))
 
     # Content mode looks only at the query's own result set; paging past it would
@@ -185,9 +224,34 @@ echo "timeout  : ${timeout_s}s, polling every ${interval_s}s"
 started_at="$(date +%s)"
 attempt=0
 scan_capped=0
+bad_response=0
 hit=0
 scanned=0
 last_total="unknown"
+ingested=""
+warned_no_ingested=0
+
+# `read` reports the current state and never fails the job. It exists so a
+# workflow can record a document's freshness stamp BEFORE publishing and hand it
+# back afterwards, which is what makes the freshness check immune to clock skew
+# between the runner and the search cluster: it compares two readings from the
+# same clock instead of trusting either one.
+if [ "$op" = read ]; then
+  bad_response=0
+  http_ok=1
+  probe "$(date +%s)-read" || http_ok=0
+  if [ "$http_ok" -eq 1 ]; then
+    echo "read: ${subject} is $([ "$hit" -eq 1 ] && echo present || echo absent)${ingested:+, ingested=${ingested}}"
+  else
+    echo "::warning::Could not read the current state of ${subject}; continuing without a baseline."
+  fi
+  echo "::endgroup::"
+  emit "found=$([ "$hit" -eq 1 ] && echo true || echo false)"
+  emit "ingested=${ingested}"
+  emit "total-hits=${last_total}"
+  emit "elapsed-seconds=0"
+  exit 0
+fi
 
 while :; do
   attempt=$((attempt + 1))
@@ -195,20 +259,50 @@ while :; do
   elapsed=$((now - started_at))
 
   http_ok=1
+  bad_response=0
   probe "${now}-${attempt}" || http_ok=0
 
   if [ "$http_ok" -eq 1 ]; then
-    if { [ "$expect" = present ] && [ "$hit" -eq 1 ]; } ||
+    # A document that was already indexed satisfies a presence check the instant
+    # it is asked, which is why presence alone cannot tell a working pipeline
+    # from one that silently stopped delivering. When the caller supplied the
+    # value this document carried BEFORE the publish, require the index to be
+    # showing a different one now.
+    fresh=1
+    if [ "$expect" = present ] && [ "$hit" -eq 1 ] && [ -n "$previous_ingested" ]; then
+      if [ -z "$ingested" ]; then
+        if [ "$warned_no_ingested" -eq 0 ]; then
+          echo "::warning::The search template does not project payload.ingested, so freshness cannot be"
+          echo "::warning::checked and this is an existence check only — it will pass for any page that was"
+          echo "::warning::ever indexed, whether or not this publish changed anything. Add \"payload.ingested\""
+          echo "::warning::to the template's _source projection to close that gap."
+          warned_no_ingested=1
+        fi
+      elif [ "$ingested" = "$previous_ingested" ]; then
+        fresh=0
+      fi
+    fi
+
+    if { [ "$expect" = present ] && [ "$hit" -eq 1 ] && [ "$fresh" -eq 1 ]; } ||
        { [ "$expect" = absent ]  && [ "$hit" -eq 0 ] && [ "$scan_capped" -eq 0 ]; }; then
       echo "attempt ${attempt} (${elapsed}s): ${subject} is ${expect} — as expected."
       echo "::endgroup::"
-      echo "Verified in ${elapsed}s after ${attempt} poll(s). Index reported ${last_total} document(s) for this ${mode} check."
+      if [ -n "$previous_ingested" ] && [ -n "$ingested" ]; then
+        echo "Verified in ${elapsed}s after ${attempt} poll(s): re-indexed at ${ingested} (was ${previous_ingested})."
+      else
+        echo "Verified in ${elapsed}s after ${attempt} poll(s). Index reported ${last_total} document(s) for this ${mode} check."
+      fi
       emit "found=$([ "$hit" -eq 1 ] && echo true || echo false)"
       emit "elapsed-seconds=${elapsed}"
       emit "total-hits=${last_total}"
+      emit "ingested=${ingested}"
       exit 0
     fi
-    echo "attempt ${attempt} (${elapsed}s): not yet — ${subject} $([ "$hit" -eq 1 ] && echo present || echo absent), index reported ${last_total} document(s)."
+    if [ "${fresh:-1}" -eq 0 ]; then
+      echo "attempt ${attempt} (${elapsed}s): present, but still carrying the pre-publish stamp ${previous_ingested} — not re-indexed yet."
+    else
+      echo "attempt ${attempt} (${elapsed}s): not yet — ${subject} $([ "$hit" -eq 1 ] && echo present || echo absent), index reported ${last_total} document(s)."
+    fi
   else
     echo "attempt ${attempt} (${elapsed}s): the request to the delivery endpoint failed; will retry."
   fi
@@ -222,6 +316,24 @@ echo "::endgroup::"
 emit "found=$([ "$hit" -eq 1 ] && echo true || echo false)"
 emit "elapsed-seconds=${elapsed}"
 emit "total-hits=${last_total}"
+emit "ingested=${ingested}"
+
+if [ "$bad_response" -eq 1 ]; then
+  echo "::error::The delivery endpoint returned a response that is not a search result."
+  echo "::error::endpoint: ${endpoint}"
+  echo "::error::That is a configuration problem, not an ingestion one — this is what happens when"
+  echo "::error::the INGESTION url, an EDS host, or a redirecting apex domain is used as the"
+  echo "::error::delivery url. Nothing about the index has been proven either way."
+  exit 1
+fi
+
+if [ "${fresh:-1}" -eq 0 ]; then
+  echo "::error::'${subject}' is in the index but was never re-indexed: it still carries the"
+  echo "::error::stamp it had before this publish (${previous_ingested})."
+  echo "::error::The ingestion API accepted the event and nothing acted on it — look at the mesh,"
+  echo "::error::not at this workflow."
+  exit 1
+fi
 
 echo "::error::Timed out after ${timeout_s}s: '${subject}' is still not ${expect} in the StreamX index."
 echo "::error::endpoint: ${endpoint} (${mode} check)"

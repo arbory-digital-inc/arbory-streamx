@@ -38,6 +38,26 @@ The distinction is the whole point:
   under a query" is not evidence of "removed from the index". The action warns if
   asked to do that.
 
+### Freshness: the gap that existence cannot close
+
+An existence check passes the instant it is asked for any page that has ever been
+indexed. If ingestion silently stops — an expired token, a delivery URL left
+pointing at a retired mesh, a page fetcher that started 404ing — every publish
+still goes green against a document that was indexed months ago. **A check that
+cannot fail is worse than no check, because it is trusted.**
+
+The index already knows better. The default ingest pipeline stamps
+`payload.ingested` on every index operation, and the mapping types it as a date.
+So: read the stamp before publishing (`mode: read`), pass it back as
+`previous-ingested`, and the check only passes once the index is showing a
+*different* one. Comparing two readings taken from the same clock also sidesteps
+any skew between the runner and the search cluster.
+
+This requires the search template to project `payload.ingested` in its `_source`.
+Until it does, the action says so in a warning and degrades to an existence
+check rather than pretending. The other way to prove freshness needs no template
+change: query for a word that appears only in the new text.
+
 A capped scan is never treated as proof of absence: if the index is larger than
 `max-scan`, the action fails and says so rather than reporting a clean bill of
 health it did not earn.
@@ -87,6 +107,11 @@ struggling.
   cache is how a test ends up asserting against a stale answer.
 - `jq` is used when present, with a text-extraction fallback for hardened
   runners that lack it. Both paths are exercised by this repository's CI.
+- A 200 response is not automatically a *search* response. An HTML maintenance
+  page, a WAF interstitial, a redirecting apex domain, or the ingestion URL used
+  by mistake all parse as "zero hits" — which would **satisfy** an `absent`
+  assertion. The action requires the body to be OpenSearch-shaped before it will
+  interpret it at all.
 - A failed request to the delivery host is reported differently from a missing
   document — a misconfigured URL or a TLS-inspecting proxy is not an ingestion
   failure, and sending someone to debug the wrong system wastes the outage.

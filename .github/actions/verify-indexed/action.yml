@@ -44,12 +44,32 @@ inputs:
     description: 'Seconds between polls.'
     required: false
     default: '10'
+  previous-ingested:
+    description: >-
+      The value payload.ingested carried BEFORE the publish, read with mode=read.
+      When set, the document must be showing a DIFFERENT value before the check
+      passes — which is what separates "this page is in the index" from "this
+      publish actually re-indexed it". Comparing two readings rather than a
+      timestamp against the runner's clock keeps this immune to clock skew.
+      Ignored, with a warning, if the search template does not project
+      payload.ingested.
+    required: false
+  mode:
+    description: >-
+      'verify' (default) asserts and fails. 'read' reports the document's current
+      state and freshness stamp and always exits 0 — use it before a publish to
+      capture the baseline for previous-ingested.
+    required: false
+    default: 'verify'
   size:
     description: 'Result window size. If the query matches more documents than this, the target may fall outside it — the failure message says so explicitly.'
     required: false
     default: '100'
 
 outputs:
+  ingested:
+    description: 'The document payload.ingested stamp, when the search template projects it. Empty otherwise.'
+    value: ${{ steps.verify.outputs.ingested }}
   found:
     description: 'true if the document was in the index on the final poll.'
     value: ${{ steps.verify.outputs.found }}
@@ -75,4 +95,6 @@ runs:
         SX_TIMEOUT: ${{ inputs.timeout-seconds }}
         SX_INTERVAL: ${{ inputs.poll-interval-seconds }}
         SX_SIZE: ${{ inputs.size }}
+        SX_PREVIOUS_INGESTED: ${{ inputs.previous-ingested }}
+        SX_MODE: ${{ inputs.mode }}
       run: bash "${{ github.action_path }}/verify-indexed.sh"
