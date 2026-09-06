@@ -1,0 +1,68 @@
+# Gate on the mesh definition itself.
+#
+# Merging here redeploys the mesh, so this is the last point at which a wiring
+# mistake is cheap. On 2026-09-06 one got through: a restructure re-pointed a
+# consumer at a channel nothing wrote to, publishes were silently discarded for
+# two and a half hours, and every service stayed green throughout. The defect was
+# in mesh.yaml the whole time and takes a second to find mechanically.
+#
+# In a two-mesh setup (develop -> dev mesh, main -> prod mesh) this is a required
+# check on the promotion PR, not just on push.
+name: Verify mesh
+
+on:
+  push:
+    paths:
+      - 'mesh/**'
+      - '.github/workflows/verify-mesh.yaml'
+      - 'scripts/mesh/**'
+  pull_request:
+    paths:
+      - 'mesh/**'
+      - '.github/workflows/verify-mesh.yaml'
+      - 'scripts/mesh/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wiring:
+    name: Channel wiring
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the regression check below reaches back to the outage
+      # commit, and a shallow clone would silently find nothing and skip it —
+      # turning the guard on the guard into a no-op.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Fails when any channel is produced but never consumed, or consumed but
+      # never produced. Deliberate dead ends are declared in
+      # mesh/.wiring-allow-orphans with a reason.
+      - name: Every channel has a producer and a consumer
+        run: python3 scripts/mesh/check-wiring.py mesh/mesh.yaml
+
+      # A regression test for the checker itself: the mesh as it stood during the
+      # outage must still be rejected. Without this, someone "fixing" a noisy
+      # check could quietly defeat the thing that would have caught it.
+      - name: The checker still rejects the 2026-09-06 outage mesh
+        run: |
+          set -uo pipefail
+          fix="$(git log --format=%H --grep='Reconnect the page ingestion chain' | head -1)"
+          if [ -z "$fix" ]; then
+            echo "::notice::outage commit not in this history; skipping the regression check"
+            exit 0
+          fi
+          git show "${fix}^:mesh/mesh.yaml" > /tmp/outage-mesh.yaml
+          if python3 scripts/mesh/check-wiring.py /tmp/outage-mesh.yaml > /tmp/out.txt 2>&1; then
+            echo "::error::check-wiring.py PASSED the mesh that caused the 2026-09-06 outage."
+            echo "::error::It is no longer detecting the failure it exists to detect."
+            cat /tmp/out.txt
+            exit 1
+          fi
+          grep -q 'inbox.pages is produced but never consumed' /tmp/out.txt \
+            && grep -q 'relay.pages is consumed but never produced' /tmp/out.txt \
+            || { echo "::error::rejected the outage mesh, but not for the expected reasons:"; cat /tmp/out.txt; exit 1; }
+          echo "ok: the outage mesh is still rejected, for both of its original faults."
