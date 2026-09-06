@@ -208,8 +208,12 @@ processing:
     containers:
       processor:
         incoming:
+          # inbox.pages, not relay.pages: the github source writes ingested pages
+          # to inbox.pages, and nothing in this mesh moves them on to relay.pages.
+          # Reading relay.pages means reading a topic nobody writes to, which is
+          # silent rather than noisy — no consumer, no error, no index.
           pages:
-            ref: relay.pages
+            ref: inbox.pages
           fragments:
             ref: relay.fragments
         outgoing:
