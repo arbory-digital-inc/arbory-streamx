@@ -38,17 +38,27 @@ if [ ! -f "$action_yml" ]; then
   exit 1
 fi
 
-# --- 1. No third-party action references -------------------------------------
-# Permitted: a local path (./...) and the GitHub-authored actions/* org.
-# `github/*` is deliberately NOT permitted: it is GitHub-the-company's product
-# org, not the runner's action org, and an allow-list may treat it differently.
+# --- 1. No third-party action references, and no relative ones either --------
+# Permitted: the GitHub-authored actions/* org, allowed by the policy's "created
+# by GitHub" clause. `github/*` is deliberately NOT permitted here: the same
+# clause covers it, but it is GitHub's product org rather than the runner action
+# org, and nothing in this action needs it.
+#
+# `uses: ./...` is rejected too, which looks wrong for a vendored action and is
+# not. A relative reference inside a composite action resolves against the
+# CALLER's workspace, not against the action's own directory — so a `./` step
+# here would go looking inside the consuming repo's checkout and fail there,
+# while working perfectly in the repo that owns the copy. Files belonging to
+# this action are reached through ${{ github.action_path }}, which is correct in
+# both consumption modes.
 offending="$(grep -nE '^[[:space:]]*-?[[:space:]]*uses:' "$action_yml" \
-  | grep -vE 'uses:[[:space:]]*'"'"'?"?(\./|actions/)' || true)"
+  | grep -vE "uses:[[:space:]]*'?\"?actions/" || true)"
 if [ -n "$offending" ]; then
-  fail "third-party action reference(s) in $(basename "$action_yml"):"
+  fail "disallowed action reference(s) in $(basename "$action_yml"):"
   printf '%s\n' "$offending" >&2
+  echo "  Only actions/* is allowed here. For files inside this action, use \${{ github.action_path }}." >&2
 else
-  pass "every 'uses:' is a local path or an actions/* action"
+  pass "every 'uses:' is an actions/* action; no relative references"
 fi
 
 # --- 2. The removed curl|bash bootstrap has not crept back --------------------
