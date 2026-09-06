@@ -1,0 +1,78 @@
+# Assert that a document actually reached the StreamX search index.
+#
+# The connector's "CloudEvent ... was sent successfully" means the ingestion API
+# accepted the event. Everything after that — indexing, replication to the edge —
+# is asynchronous and invisible to the workflow that triggered it, so a pipeline
+# that has silently stopped indexing looks exactly like a working one from inside
+# GitHub Actions. This closes that gap by asking the same endpoint a reader's
+# browser asks.
+#
+# Like the connector action next door, this references no third-party action, so
+# it runs in an org whose actions allow-list is limited to enterprise-owned,
+# GitHub-authored or Marketplace-verified actions. It has no `uses:` at all.
+name: 'streamx-verify-indexed'
+description: >-
+  Poll a StreamX delivery endpoint until a given document id is present in (or
+  absent from) the search index, and fail the job if it never gets there.
+
+inputs:
+  delivery-url:
+    description: 'StreamX delivery/edge base URL (NOT the ingestion URL) — e.g. https://<mesh>.<region>.prod-ext.streamx.cloud.'
+    required: true
+  subject:
+    description: 'The CloudEvent subject, which StreamX uses as the document _id (e.g. en:/en/blog/my-page).'
+    required: true
+  query:
+    description: 'Search term to query with. Must be selective enough that the document falls inside the result window.'
+    required: true
+  search-path:
+    description: 'Path of the search endpoint on the delivery host.'
+    required: false
+    default: '/search/pages/'
+  expect:
+    description: "'present' to wait for the document to appear (after a publish), 'absent' to wait for it to disappear (after an unpublish)."
+    required: false
+    default: 'present'
+  namespace:
+    description: 'Optional namespace filter passed through to the search template.'
+    required: false
+  timeout-seconds:
+    description: 'How long to keep polling before failing.'
+    required: false
+    default: '300'
+  poll-interval-seconds:
+    description: 'Seconds between polls.'
+    required: false
+    default: '10'
+  size:
+    description: 'Result window size. If the query matches more documents than this, the target may fall outside it — the failure message says so explicitly.'
+    required: false
+    default: '100'
+
+outputs:
+  found:
+    description: 'true if the document was in the index on the final poll.'
+    value: ${{ steps.verify.outputs.found }}
+  elapsed-seconds:
+    description: 'Seconds between the first poll and the assertion being satisfied. Worth watching: this is the pipeline latency.'
+    value: ${{ steps.verify.outputs.elapsed-seconds }}
+  total-hits:
+    description: 'How many documents the query matched on the final poll.'
+    value: ${{ steps.verify.outputs.total-hits }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: verify
+      shell: bash
+      env:
+        SX_DELIVERY_URL: ${{ inputs.delivery-url }}
+        SX_SUBJECT: ${{ inputs.subject }}
+        SX_QUERY: ${{ inputs.query }}
+        SX_SEARCH_PATH: ${{ inputs.search-path }}
+        SX_EXPECT: ${{ inputs.expect }}
+        SX_NAMESPACE: ${{ inputs.namespace }}
+        SX_TIMEOUT: ${{ inputs.timeout-seconds }}
+        SX_INTERVAL: ${{ inputs.poll-interval-seconds }}
+        SX_SIZE: ${{ inputs.size }}
+      run: bash "${{ github.action_path }}/verify-indexed.sh"

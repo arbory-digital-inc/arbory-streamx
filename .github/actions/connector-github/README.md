@@ -43,7 +43,7 @@ Two consumption modes, both supported:
 | Mode | Reference | Needs |
 | --- | --- | --- |
 | **Cross-repo** | `uses: <org>/<streamx-repo>/.github/actions/connector-github@v1` | The action repo readable by the caller. For a **private or internal** action repo that means *Settings → Actions → General → Access → "Accessible from repositories in the `<org>` organization"* — without it the caller gets a "repository not found" style failure. |
-| **Path-vendored** | `uses: ./.github/actions/connector-github` | The files copied into the consuming repo (`scripts/vendor/sync-connector-action.sh`) **and** an `actions/checkout` step before the action runs — a local action that has not been checked out does not exist. |
+| **Path-vendored** | `uses: ./.github/actions/connector-github` | The files copied into the consuming repo (`scripts/vendor/sync-vendored-action.sh`) **and** an `actions/checkout` step before the action runs — a local action that has not been checked out does not exist. |
 
 > **The checkout that path-vendoring forces you to add is not free of consequences.**
 > A sparse checkout of just the action directory is enough to *run* the action, and
@@ -160,7 +160,7 @@ deleting the cache step costs about 90 seconds a run and nothing else.
 **A path-vendored copy is a file in the consuming repo, and tools will treat it
 as one.** In particular a `github-actions` Dependabot ecosystem will open PRs
 bumping the `actions/setup-java` and `actions/cache` pins inside the vendored
-`action.yml`, which drifts it from source. That is why `sync-connector-action.sh
+`action.yml`, which drifts it from source. That is why `sync-vendored-action.sh
 --check` belongs in the consuming repo's CI: the drift then fails loudly instead
 of accumulating. Cross-repo consumption avoids this entirely.
 

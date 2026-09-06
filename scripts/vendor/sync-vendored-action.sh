@@ -17,26 +17,37 @@
 # than no copy, because it fails in production with a fixed bug.
 #
 # Usage:
-#   sync-connector-action.sh <target-repo-root>            # copy in / update
-#   sync-connector-action.sh <target-repo-root> --check    # report drift only
+#   sync-vendored-action.sh <target-repo-root> [--check] [action-name]
+#
+#   action-name defaults to connector-github. Pass verify-indexed to vendor the
+#   index verifier instead; both are needed if the consuming repo cannot
+#   reference this one cross-repo.
 set -euo pipefail
 
 source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source_dir="${source_root}/.github/actions/connector-github"
-rel_dir=".github/actions/connector-github"
 
-# Only these are vendored. The manifest is generated per target and is
-# deliberately excluded from the comparison set, so it can record the hashes
-# without changing what is being hashed.
-FILES=(action.yml install-jbang.sh README.md check-allowlist-safety.sh)
-MANIFEST="VENDORED-FROM.txt"
-
-usage() { echo "usage: $(basename "$0") <target-repo-root> [--check]" >&2; exit 2; }
+usage() { echo "usage: $(basename "$0") <target-repo-root> [--check] [action-name]" >&2; exit 2; }
 
 target_root="${1:-}"
 mode="${2:-sync}"
+action_name="${3:-connector-github}"
 [ -n "$target_root" ] || usage
 [ "$mode" = "sync" ] || [ "$mode" = "--check" ] || usage
+
+source_dir="${source_root}/.github/actions/${action_name}"
+rel_dir=".github/actions/${action_name}"
+[ -f "${source_dir}/action.yml" ] || { echo "error: no action at ${rel_dir}" >&2; exit 1; }
+
+# Everything the action is made of, plus the guard — a vendored copy without the
+# guard has no way to notice it has broken the one property it exists to hold.
+# The manifest is generated per target and is deliberately excluded from the
+# comparison set, so it can record the hashes without changing what is hashed.
+FILES=()
+while IFS= read -r f; do FILES+=("$(basename "$f")"); done < <(
+  find "$source_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.sh' -o -name '*.md' \) | sort
+)
+FILES+=(check-allowlist-safety.sh)
+MANIFEST="VENDORED-FROM.txt"
 
 if [ ! -d "$target_root" ]; then
   echo "error: target repo root does not exist: ${target_root}" >&2
@@ -130,11 +141,11 @@ chmod 0755 "${target_dir}/install-jbang.sh" "${target_dir}/check-allowlist-safet
   echo "Source repo:   ${source_remote}"
   echo "Source path:   ${rel_dir}"
   echo "Source commit: ${source_commit}${source_dirty}"
-  echo "Synced by:     scripts/vendor/sync-connector-action.sh"
+  echo "Synced by:     scripts/vendor/sync-vendored-action.sh"
   echo "Synced at:     $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo
   echo "Edit the source, then re-run the sync script. To detect drift in CI:"
-  echo "    sync-connector-action.sh <this-repo-root> --check"
+  echo "    sync-vendored-action.sh <this-repo-root> --check"
   echo
   echo "sha256:"
   for f in "${FILES[@]}"; do
