@@ -20,14 +20,25 @@
 # The content is already live, so re-publishing is an upsert: readers see no
 # change.
 #
+# IT PUBLISHES ONE PATH AT A TIME, AND THAT IS NOT AN OVERSIGHT
+# ------------------------------------------------------------
+# AEM's admin API has a bulk form -- POST /live/{org}/{site}/{ref}/* with a paths
+# array -- which is far faster and completely useless here. Measured 2026-09-06:
+# bulk jobs complete and report success ("processed: 1, success: 1"), the pages
+# really are published, and NO resource-published dispatch is emitted for any of
+# them. Only the single-path form fires the dispatch this pipeline is built on.
+#
+# So a bulk rebuild looks like it worked, takes a fraction of the time, and
+# indexes nothing. One request per page it is.
+#
 # Usage:
 #   republish-all.sh --org O --site S --ref R [options]
 #
 #   --token-file F   file holding the AEM admin bearer token (default: ~/today-da-token.txt)
 #   --sitemap URL    override the sitemap URL
 #   --filter REGEX   only paths matching this
-#   --batch N        paths per bulk request (default 50)
-#   --delay S        seconds between batches (default 10)
+#   --batch N        publish this many, then pause (default 50)
+#   --delay S        seconds to pause between batches (default 10)
 #   --dry-run        list what would be published and stop
 set -euo pipefail
 
@@ -102,37 +113,31 @@ fi
 token="$(tr -d '\n\r' < "$token_file")"
 [ -n "$token" ] || { echo "error: token file ${token_file} is empty" >&2; exit 1; }
 
-endpoint="https://admin.hlx.page/live/${org}/${site}/${ref}/*"
-total=0; failed=0
-split -l "$batch" "${work}/paths.txt" "${work}/batch."
+base="https://admin.hlx.page/live/${org}/${site}/${ref}"
+total=0; failed=0; n=0
+count="$(grep -c . "${work}/paths.txt" || true)"
 
-for f in "${work}"/batch.*; do
-  n="$(grep -c . "$f" || true)"
-  python3 - "$f" > "${work}/body.json" <<'PY'
-import json, sys
-paths = [l.strip() for l in open(sys.argv[1]) if l.strip()]
-print(json.dumps({"forceUpdate": True, "paths": paths}))
-PY
-  code="$(curl --silent --show-error --location --max-time 300 \
-      -o "${work}/resp.json" -w '%{http_code}' \
-      -X POST "$endpoint" \
-      -H "Authorization: Bearer ${token}" \
-      -H 'Content-Type: application/json' \
-      --data @"${work}/body.json" || echo 000)"
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  n=$((n + 1))
+  code="$(curl --silent --show-error --location --max-time 120 \
+      -o /dev/null -w '%{http_code}' \
+      -X POST "${base}${path}" \
+      -H "Authorization: Bearer ${token}" || echo 000)"
 
-  if [ "$code" = "200" ] || [ "$code" = "202" ]; then
-    echo "  batch of ${n}: accepted (HTTP ${code})"
-    total=$((total + n))
-  else
-    echo "  batch of ${n}: FAILED (HTTP ${code})" >&2
-    head -c 400 "${work}/resp.json" >&2; echo >&2
-    failed=$((failed + n))
+  case "$code" in
+    200|202|204) total=$((total + 1)) ;;
+    *) failed=$((failed + 1)); echo "  ${path}: FAILED (HTTP ${code})" >&2 ;;
+  esac
+
+  if [ $((n % batch)) -eq 0 ] && [ "$n" -lt "$count" ]; then
+    echo "  ${n}/${count} published (${failed} failed); pausing ${delay}s"
+    sleep "$delay"
   fi
-  sleep "$delay"
-done
+done < "${work}/paths.txt"
 
 echo
-echo "Submitted ${total} page(s); ${failed} failed."
+echo "Published ${total} page(s); ${failed} failed."
 echo "Each publish fires a resource-published dispatch, so watch the workflow runs"
 echo "and then confirm the index actually grew — an accepted publish is not an"
 echo "indexed page, which is the whole reason this rebuild is happening."
