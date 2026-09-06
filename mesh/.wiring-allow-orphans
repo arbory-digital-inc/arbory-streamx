@@ -1,0 +1,19 @@
+# Channels with only one end, accepted deliberately.
+#
+# check-wiring.py fails on any channel that is produced but never consumed, or
+# consumed but never produced, because that is how the 2026-09-06 outage worked:
+# publishes went into a channel with no subscriber and were silently discarded.
+#
+# An entry here is a claim that a dead end is intentional. If you cannot say why
+# in a comment, it is a bug, not an entry.
+
+# Fragments are not ingested in this deployment. The github source produces only
+# inbox.pages, inbox.renderers and inbox.rendering-contexts, so nothing ever
+# reaches the fragments path: the producer's `fragments` input reads a channel
+# with no writer, and the rendering engine's fragment output has no reader.
+#
+# Vestigial rather than broken — but note these are the SAME shape as the page
+# outage. If fragments are ever switched on, wire these two before anything else,
+# or fragment ingestion will fail exactly as silently.
+relay.fragments
+outbox.fragments

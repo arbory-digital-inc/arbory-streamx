@@ -173,6 +173,18 @@ indexable-resources-relay      IN relay.indexable-resources  OUT outbox.indexabl
 opensearch-sink                IN outbox.indexable-resources
 ```
 
+`scripts/mesh/check-wiring.py` does this mechanically and fails on any channel
+with only one end; CI runs it on every change to `mesh/`. Run it locally before
+opening a mesh PR:
+
+```bash
+python3 scripts/mesh/check-wiring.py mesh/mesh.yaml
+```
+
+Deliberate dead ends go in `mesh/.wiring-allow-orphans` with a reason. Run against
+the mesh as it stood during the outage it reports both faults in about a second,
+which is the argument for having it.
+
 **Read the map for orphans.** A channel that appears only as an `OUT` is being
 written to with nobody listening; a channel that appears only as an `IN` is being
 read from with nobody writing. Either one silently drops every message. On
