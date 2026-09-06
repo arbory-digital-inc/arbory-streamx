@@ -133,7 +133,12 @@ for f in "${FILES[@]}"; do
     install -m 0644 "${source_dir}/${f}" "${target_dir}/${f}"
   fi
 done
-chmod 0755 "${target_dir}/install-jbang.sh" "${target_dir}/check-allowlist-safety.sh"
+# Every vendored shell script, rather than a hardcoded list — the connector has
+# install-jbang.sh, the verifier has verify-indexed.sh, and a name that only
+# exists in one of them makes the script fail on the other.
+for f in "${FILES[@]}"; do
+  case "$f" in *.sh) chmod 0755 "${target_dir}/${f}" ;; esac
+done
 
 {
   echo "This directory is a vendored copy. Do not edit it here."
