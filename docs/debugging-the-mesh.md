@@ -71,9 +71,35 @@ had happened sixty seconds earlier. **Reach for this before anything else.**
 
 ### 4. If indexing has stopped: check the chain is connected
 
-See [The chain](#the-chain) below. This is where the 2026-09-06 fault was.
+See [The chain](#the-chain) below — this is where the 2026-09-06 fault was — and
+read the service logs in the console's **Services** tab
+([where things are](#where-things-are-in-the-console)). Note that a severed chain
+produces *no* log output at all, so silence there is a finding rather than a dead
+end: a service cannot fail on messages it was never handed.
 
 ---
+
+## Where things are in the console
+
+`https://console.prod-ext.streamx.cloud/organizations/so-arborydigital/projects/so-arborydigital-arboryda-7cef6/`
+
+| Tab | What it gives you |
+| --- | --- |
+| **Services** | **Per-service logs.** This is where `opensearch-sink`, `indexable-resources-producer` and the rest print. Finding this took the longest during the 2026-09-06 outage; go here early. |
+| **Channels** | Backlog per channel — read with the [zero-backlog trap](#the-zero-backlog-trap) in mind. Clicking a channel gives a backlog graph over time, which is how you tell today's backlog from one that has been stuck for a week. |
+| **Gateways** | The authoritative hostname → route → service mapping. Settles any "which URL is which" question. |
+| **Mesh / Mesh editor** | The deployed mesh definition, and which git repo and branch it is sourced from. |
+
+Every view takes a `timeRange` query parameter, so a link can carry its own
+window:
+
+```
+.../services?timeRange=%7B%22type%22%3A%22time-preset%22%2C%22presetId%22%3A%226h%22%7D
+```
+
+Widen it before concluding a service is quiet — the default window is short
+enough to hide a startup that happened an hour ago, and startup is exactly where
+`service-init` migrations and channel subscriptions either succeed or don't.
 
 ## Two hostnames, and they are not interchangeable
 
@@ -188,8 +214,9 @@ It lists the source channels it is proxying (`data-sx-proxy-inbox.pages` etc.).
 Useful for confirming ingestion is alive — but note it says nothing about whether
 anything downstream consumes those channels.
 
-The delivery host does **not** expose `/q/health`, `_mapping`, `_cat/indices` or
-any other OpenSearch admin API. Only the named search templates are reachable.
+For anything beyond liveness, use the console's **Services** tab logs rather than
+probing from outside — the delivery host does **not** expose `/q/health`,
+`_mapping`, `_cat/indices` or any other OpenSearch admin API. Only the named search templates are reachable.
 Requests to unknown paths log `Search template with searchTemplateId {0} could
 not be found` in the sink — those lines are usually your own probing, not a fault.
 
