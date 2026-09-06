@@ -15,13 +15,13 @@ name: Verify StreamX actions
 on:
   push:
     paths:
-      - '.github/actions/connector-github/**'
+      - '.github/actions/**'
       - '.github/workflows/verify-actions.yaml'
       - 'scripts/vendor/**'
       - 'docs/upstream/**'
   pull_request:
     paths:
-      - '.github/actions/connector-github/**'
+      - '.github/actions/**'
       - '.github/workflows/verify-actions.yaml'
       - 'scripts/vendor/**'
       - 'docs/upstream/**'
