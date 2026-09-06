@@ -26,9 +26,14 @@ inputs:
     description: 'Search term to query with. Must be selective enough that the document falls inside the result window.'
     required: true
   search-path:
-    description: 'Path of the search endpoint on the delivery host.'
+    description: >-
+      Path of the search endpoint on the delivery host. The path segment selects
+      the OpenSearch search template, and templates differ in what they project:
+      freshness checking needs one whose _source includes payload.ingested.
+      Pointing this at a template without it silently downgrades every freshness
+      check to an existence check.
     required: false
-    default: '/search/pages/'
+    default: '/search/eds-pages/'
   expect:
     description: "'present' to wait for the document to appear (after a publish), 'absent' to wait for it to disappear (after an unpublish)."
     required: false
