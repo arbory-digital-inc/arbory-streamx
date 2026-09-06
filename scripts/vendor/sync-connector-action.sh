@@ -28,7 +28,7 @@ rel_dir=".github/actions/connector-github"
 # Only these are vendored. The manifest is generated per target and is
 # deliberately excluded from the comparison set, so it can record the hashes
 # without changing what is being hashed.
-FILES=(action.yml install-jbang.sh README.md)
+FILES=(action.yml install-jbang.sh README.md check-allowlist-safety.sh)
 MANIFEST="VENDORED-FROM.txt"
 
 usage() { echo "usage: $(basename "$0") <target-repo-root> [--check]" >&2; exit 2; }
@@ -62,14 +62,16 @@ if [ "$mode" = "--check" ]; then
   fi
   drift=0
   for f in "${FILES[@]}"; do
+    src="${source_dir}/${f}"
+    [ "$f" = "check-allowlist-safety.sh" ] && src="${source_root}/scripts/vendor/${f}"
     if [ ! -f "${target_dir}/${f}" ]; then
       echo "DRIFT: missing ${rel_dir}/${f}" >&2
       drift=1
       continue
     fi
-    if [ "$(hash_of "${source_dir}/${f}")" != "$(hash_of "${target_dir}/${f}")" ]; then
+    if [ "$(hash_of "$src")" != "$(hash_of "${target_dir}/${f}")" ]; then
       echo "DRIFT: ${rel_dir}/${f} differs from source" >&2
-      diff -u "${target_dir}/${f}" "${source_dir}/${f}" | sed 's/^/    /' >&2 || true
+      diff -u "${target_dir}/${f}" "$src" | sed 's/^/    /' >&2 || true
       drift=1
     fi
   done
@@ -90,7 +92,14 @@ fi
 if [ -d "$target_dir" ]; then
   for f in "${FILES[@]}"; do
     [ -f "${target_dir}/${f}" ] || continue
-    if [ "$(hash_of "${source_dir}/${f}")" != "$(hash_of "${target_dir}/${f}")" ]; then
+    src="${source_dir}/${f}"
+    [ "$f" = "check-allowlist-safety.sh" ] && src="${source_root}/scripts/vendor/${f}"
+    if [ "$(hash_of "$src")" != "$(hash_of "${target_dir}/${f}")" ]; then
+      if ! git -C "$target_root" ls-files --error-unmatch -- "${rel_dir}/${f}" >/dev/null 2>&1; then
+        echo "error: ${rel_dir}/${f} differs from source and is not tracked by git." >&2
+        echo "       An untracked local copy cannot be recovered once overwritten." >&2
+        exit 1
+      fi
       if ! git -C "$target_root" diff --quiet -- "${rel_dir}/${f}" 2>/dev/null; then
         echo "error: ${rel_dir}/${f} has uncommitted local changes in the target repo." >&2
         echo "       Commit or discard them first — this script would overwrite them." >&2
@@ -107,9 +116,13 @@ git -C "$source_root" diff --quiet -- "$rel_dir" 2>/dev/null || source_dirty=" (
 
 mkdir -p "$target_dir"
 for f in "${FILES[@]}"; do
-  install -m 0644 "${source_dir}/${f}" "${target_dir}/${f}"
+  if [ "$f" = "check-allowlist-safety.sh" ]; then
+    install -m 0644 "${source_root}/scripts/vendor/${f}" "${target_dir}/${f}"
+  else
+    install -m 0644 "${source_dir}/${f}" "${target_dir}/${f}"
+  fi
 done
-chmod 0755 "${target_dir}/install-jbang.sh"
+chmod 0755 "${target_dir}/install-jbang.sh" "${target_dir}/check-allowlist-safety.sh"
 
 {
   echo "This directory is a vendored copy. Do not edit it here."

@@ -21,8 +21,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 upstream_repo="streamx-hub/streamx-common-github-actions"
 upstream_path=".github/actions/connector-github/action.yml"
 
-refs=("$@")
-[ "${#refs[@]}" -gt 0 ] || refs=(v1 v2)
+# Written long-hand: under `set -u` on bash 3.2 (still the system bash on
+# macOS), expanding an empty "$@" into an array is an unbound-variable error.
+if [ "$#" -gt 0 ]; then
+  refs=("$@")
+else
+  refs=(v1 v2)
+fi
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT

@@ -79,30 +79,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Download streamx-github-connector snapshot dependency
-      if: inputs.snapshot-artifactory-token != ''
-      shell: bash
-      run: |
-        if [ -f ~/.m2/settings.xml ]; then
-          if ! grep -q '<id>streamx-maven-snapshots</id>' ~/.m2/settings.xml; then
-            sed -i.bak 's@</servers>@<server><id>streamx-maven-snapshots</id><username>oauth2accesstoken</username><password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password></server></servers>@' ~/.m2/settings.xml
-          fi
-        else
-          mkdir -p ~/.m2/
-          cat <<\EOF > ~/.m2/settings.xml
-        <?xml version="1.0"?>
-        <settings>
-          <servers>
-            <server>
-              <id>streamx-maven-snapshots</id>
-              <username>oauth2accesstoken</username>
-              <password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password>
-            </server>
-          </servers>
-        </settings>
-        EOF
-        fi
-
     # GitHub-authored action: permitted by the allow-list.
     #
     # Upstream v1 pins setup-java@v3 with distribution 'adopt'; both are
@@ -129,6 +105,36 @@ runs:
         key: ${{ runner.os }}-m2-streamx-connector-2.0.0
         restore-keys: |
           ${{ runner.os }}-m2-streamx-connector-
+
+    # Ordered AFTER the cache restore, unlike upstream. actions/cache unpacks
+    # the cached tree over ~/.m2, so a settings.xml written before the restore
+    # is overwritten by whatever settings.xml the cache happens to hold — and
+    # since the cache is saved from a job that had one, the stale copy
+    # perpetuates itself. Only reachable when snapshot-artifactory-token is set,
+    # which is why it has survived upstream unnoticed.
+    - name: Download streamx-github-connector snapshot dependency
+      if: inputs.snapshot-artifactory-token != ''
+      shell: bash
+      run: |
+        if [ -f ~/.m2/settings.xml ]; then
+          if ! grep -q '<id>streamx-maven-snapshots</id>' ~/.m2/settings.xml; then
+            sed -i.bak 's@</servers>@<server><id>streamx-maven-snapshots</id><username>oauth2accesstoken</username><password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password></server></servers>@' ~/.m2/settings.xml
+          fi
+        else
+          mkdir -p ~/.m2/
+          cat <<\EOF > ~/.m2/settings.xml
+        <?xml version="1.0"?>
+        <settings>
+          <servers>
+            <server>
+              <id>streamx-maven-snapshots</id>
+              <username>oauth2accesstoken</username>
+              <password>${env.SNAPSHOT_ARTIFACTORY_TOKEN}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+        fi
 
     # Upstream uses jbangdev/setup-jbang@main here. That is the one reference the
     # allow-list rejects, and it is also the only step that cannot simply be

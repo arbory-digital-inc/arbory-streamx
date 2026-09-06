@@ -15,7 +15,17 @@
 #        defaults to .github/actions/connector-github relative to the repo root
 set -euo pipefail
 
-action_dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.github/actions/connector-github}"
+# Resolves in both homes this script has: next to the action after being
+# vendored into a consuming repo, or under scripts/vendor/ in the repo that owns
+# the source copy.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${1:-}" ]; then
+  action_dir="$1"
+elif [ -f "${script_dir}/action.yml" ]; then
+  action_dir="$script_dir"
+else
+  action_dir="$(cd "${script_dir}/../.." && pwd)/.github/actions/connector-github"
+fi
 action_yml="${action_dir}/action.yml"
 installer="${action_dir}/install-jbang.sh"
 
@@ -56,8 +66,8 @@ else
 fi
 
 # --- 3. JBang pins are both present ------------------------------------------
-jbang_version="$(grep -oP "^\s+JBANG_VERSION:\s*'\K[^']+" "$action_yml" || true)"
-jbang_sha="$(grep -oP "^\s+JBANG_SHA256:\s*'\K[^']+" "$action_yml" || true)"
+jbang_version="$(sed -n "s/^[[:space:]]*JBANG_VERSION:[[:space:]]*'\([^']*\)'.*/\1/p" "$action_yml" | head -1)"
+jbang_sha="$(sed -n "s/^[[:space:]]*JBANG_SHA256:[[:space:]]*'\([^']*\)'.*/\1/p" "$action_yml" | head -1)"
 if [ -z "$jbang_version" ] || [ -z "$jbang_sha" ]; then
   fail "the Install JBang step must pin both JBANG_VERSION and JBANG_SHA256 (found version='${jbang_version}' sha='${jbang_sha}')"
 elif [ "${#jbang_sha}" -ne 64 ]; then
@@ -69,8 +79,8 @@ fi
 # --- 4. The connector version agrees with the cache key ----------------------
 # It appears twice by necessity: `key:` has to be a literal expression, and the
 # jbang command line has to name the artifact. Twice means it can drift.
-run_version="$(grep -oP 'com\.streamx:streamx-github-connector:\K[0-9][^ ]*' "$action_yml" | head -1 || true)"
-key_version="$(grep -oP 'm2-streamx-connector-\K[0-9][^\s]*' "$action_yml" | head -1 || true)"
+run_version="$(sed -n 's/.*com\.streamx:streamx-github-connector:\([0-9][^ ]*\).*/\1/p' "$action_yml" | head -1)"
+key_version="$(sed -n 's/.*m2-streamx-connector-\([0-9][^[:space:]]*\).*/\1/p' "$action_yml" | head -1)"
 if [ -z "$run_version" ]; then
   fail "could not find the com.streamx:streamx-github-connector coordinate"
 elif [ "$run_version" != "$key_version" ]; then
@@ -102,7 +112,7 @@ fi
 # --- 6. Input surface still matches upstream's ---------------------------------
 # Extra inputs leak into JSON_INPUTS and become connector configuration.
 expected_inputs="debug-enabled deleted-event-type event-data event-type external-resource-url include-patterns snapshot-artifactory-token source-provider streamx-ingestion-token streamx-ingestion-url subject workspace"
-actual_inputs="$(sed -n '/^inputs:/,/^runs:/p' "$action_yml" | grep -oP "^  \K[a-z0-9-]+(?=:)" | sort | tr '\n' ' ' | sed 's/ $//')"
+actual_inputs="$(sed -n '/^inputs:/,/^runs:/p' "$action_yml" | sed -n 's/^  \([a-z0-9-]*\):.*/\1/p' | sort | tr '\n' ' ' | sed 's/ $//')"
 if [ "$actual_inputs" != "$expected_inputs" ]; then
   fail "input surface has diverged from upstream's"
   echo "  expected: ${expected_inputs}" >&2

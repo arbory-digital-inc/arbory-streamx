@@ -67,9 +67,11 @@ jobs:
         run: |
           set -euo pipefail
           action_yml=.github/actions/connector-github/action.yml
-          jbang_version="$(grep -oP "^\s+JBANG_VERSION:\s*'\K[^']+" "$action_yml")"
-          jbang_sha="$(grep -oP "^\s+JBANG_SHA256:\s*'\K[^']+" "$action_yml")"
-          connector="$(grep -oP 'com\.streamx:streamx-github-connector:\K[0-9][^ ]*' "$action_yml" | head -1)"
+          jbang_version="$(sed -n "s/^[[:space:]]*JBANG_VERSION:[[:space:]]*'\([^']*\)'.*/\1/p" "$action_yml" | head -1)"
+          jbang_sha="$(sed -n "s/^[[:space:]]*JBANG_SHA256:[[:space:]]*'\([^']*\)'.*/\1/p" "$action_yml" | head -1)"
+          connector="$(sed -n 's/.*com\.streamx:streamx-github-connector:\([0-9][^ ]*\).*/\1/p' "$action_yml" | head -1)"
+          [ -n "$jbang_version" ] && [ -n "$jbang_sha" ] && [ -n "$connector" ] || {
+            echo "::error::could not read the pins out of ${action_yml}"; exit 1; }
           echo "jbang_version=${jbang_version}" >> "$GITHUB_OUTPUT"
           echo "jbang_sha=${jbang_sha}" >> "$GITHUB_OUTPUT"
           echo "connector=${connector}" >> "$GITHUB_OUTPUT"
@@ -83,6 +85,24 @@ jobs:
 
       - name: Register the JDK with JBang
         run: jbang jdk install 21 "${JAVA_HOME_21_X64:-$JAVA_HOME}"
+
+      # The step above is the reason the connector does not spend ~200MB
+      # downloading a second JDK, and nothing else here would notice if it
+      # stopped working — `jbang --java 21` would just silently fetch its own.
+      # Asserting the version JBang actually runs under closes that gap.
+      - name: Check that --java 21 resolves to the linked JDK
+        run: |
+          set -euo pipefail
+          cat > /tmp/WhichJava.java <<'JAVA'
+          public class WhichJava {
+            public static void main(String[] args) {
+              System.out.println("jbang-java-version=" + Runtime.version().feature());
+            }
+          }
+          JAVA
+          jbang --java 21 /tmp/WhichJava.java | tee /tmp/whichjava.txt
+          grep -qx 'jbang-java-version=21' /tmp/whichjava.txt || {
+            echo "::error::jbang --java 21 did not run on the linked JDK 21"; exit 1; }
 
       # Resolution is the part that can break without anyone noticing: it
       # reaches a third-party Maven registry over the network. `info classpath`
