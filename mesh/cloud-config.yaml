@@ -17,13 +17,8 @@ global:
       web-server-sink:
         replicas: 1
         stateful: true
-  properties: {}
 clusters:
   eu-central-waw-edge:
     enabled: true
-    overlays:
-      properties: {}
   eu-west-par-processing:
     enabled: true
-    overlays:
-      properties: {}
