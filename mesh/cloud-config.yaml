@@ -18,7 +18,7 @@ global:
         replicas: 1
         stateful: true
 clusters:
-  eu-central-waw-edge:
+  eu-west-par-edge:
     enabled: true
   eu-west-par-processing:
     enabled: true
