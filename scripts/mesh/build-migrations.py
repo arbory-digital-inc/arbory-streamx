@@ -81,9 +81,13 @@ def template(template_id: str, source_file: str) -> str:
 # Migration file -> how to build it. Versions only ever go up; never reuse one.
 # Applied migrations leave this list once pinned: their sources may move on.
 BUILDS = {
-    # Cross-site documents (`en://arborydigital.com/...`): skip_page and the content
-    # type read the path after the host.
-    'V1.0.0.8.0__update_default_index_default_pipeline.http': pipeline,
+    # og:image as payload.image (a path for the site's own media), for the
+    # more-like-this cards; a stored-only keyword, never searched.
+    'V1.0.0.8.1__update_default_index_mapping.http': mapping,
+    'V1.0.0.8.2__update_default_index_default_pipeline.http': pipeline,
+    # More like this: the search-mlt-suggestions block's related articles,
+    # same language only (exact namespace).
+    'V1.0.0.8.3__arbory_mlt_search_template.http': lambda: template('arbory-mlt', 'arbory-mlt.mustache.json'),
 }
 
 

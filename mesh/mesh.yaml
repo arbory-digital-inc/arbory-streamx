@@ -228,7 +228,7 @@ processing:
           # changes the pod spec, which rolls the producer. A mounted config is not
           # part of the pod spec, so nothing guarantees an edit to that file alone
           # restarts the service to read it (docs/deploying.md, "The restart lever").
-          PRODUCER_RESTART_LEVER: "1"
+          PRODUCER_RESTART_LEVER: "2"
         volumesFrom:
           configs:
             - "indexable-resources-producer.yaml:/deployments/config/application.yaml"

@@ -7,13 +7,16 @@
  *     payload.facets.<key>_level0      (string, or a list if the meta repeats)
  *     payload.facets.<key>_hierarchy   (array)
  *     payload.facets.<key>_path        (string)
- * Keys: description, date, category, author, and tag1..tag16 (one per
+ * Keys: description, date, category, author, image, and tag1..tag16 (one per
  * <meta property="article:tag">, by position: a fixed key keeps only the LAST
  * element its selector matched, so positional predicates are how a page keeps
  * more than one tag). `eds` and `searchtags` may add others.
  *
  * OUTPUT. Everything under payload.facets is removed first, then:
  *     payload.description           the meta description, unless already set
+ *     payload.image                 the og:image: its path when the page's own site
+ *                                   serves it (any aem.page/aem.live/arborydigital.com
+ *                                   host), so a reader builds the URL on the hit's host
  *     payload.date                  yyyy-MM-dd, parsed from the authored date
  *     payload.facets.content_type_level0   [Article|Podcast|Customer story|Event|Page]
  *     payload.facets.topic_level0          from `category`, plus community-event tags
@@ -63,6 +66,27 @@ List descriptions = raw.containsKey('description') ? raw.get('description') : ne
 def existing = ctx.payload.description;
 if ((existing == null || existing.toString().length() == 0) && !descriptions.isEmpty() && descriptions.get(0).length() > 0) {
   ctx.payload.description = descriptions.get(0);
+}
+
+/*
+ * image: EDS writes og:image absolute, on whichever host the connector fetched the
+ * page from (main--<site>--<org>.aem.live). Media is served under the same path on
+ * every host of a site, so keep only the path for the site's own hosts.
+ */
+List images = raw.containsKey('image') ? raw.get('image') : new ArrayList();
+if (!images.isEmpty() && images.get(0).length() > 0) {
+  String img = images.get(0);
+  String lower = img.toLowerCase();
+  int scheme = lower.indexOf('://');
+  if (scheme > 0) {
+    int slash = lower.indexOf('/', scheme + 3);
+    String host = slash < 0 ? lower.substring(scheme + 3) : lower.substring(scheme + 3, slash);
+    if (slash > 0 && (host.endsWith('.aem.live') || host.endsWith('.aem.page')
+        || host == 'arborydigital.com' || host.endsWith('.arborydigital.com'))) {
+      img = img.substring(slash);
+    }
+  }
+  ctx.payload.image = img;
 }
 
 /* date: "8 January 2025", "January 8, 2025", "Oct 29, 2025", "4/29/2024", "2025-01-08" */
