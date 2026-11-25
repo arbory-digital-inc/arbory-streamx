@@ -29,15 +29,20 @@ Not "deployed". Healthy. These are different, and the difference is the whole
 reason this template exists.
 
 - [ ] **The dev mesh has indexed something recently.** Bucket the index's own
-      freshness stamp — anything other than a recent bucket means indexing is
-      stopped:
+      freshness stamp across the WHOLE index — anything other than a recent
+      bucket means indexing is stopped. It has to page: the template sorts by
+      content date, so the first 1,000 hits are not the most recently indexed,
+      and on a large index one page reports "stopped" on a healthy mesh. Run it
+      more than once when the sink runs more than one replica: each has its own
+      stamps (docs/debugging-the-mesh.md, "More than one replica").
 
-      curl -s --get --data-urlencode 'size=1000' \
-        "$DEV_DELIVERY_URL/search/eds-pages/" \
-      | python3 -c "import json,sys,collections; d=json.load(sys.stdin); \
-        ts=[h['_source'].get('payload',{}).get('ingested','') for h in d['hits']['hits']]; \
-        print(d['hits']['total']['value'],'docs'); \
-        [print(' ',k,'->',v) for k,v in sorted(collections.Counter(t[:16] for t in ts if t).items())]"
+      python3 -c "import json,sys,collections,urllib.request as u,urllib.parse as p; \
+        B=sys.argv[1]+'/search/eds-pages/?'; \
+        get=lambda f,n: json.load(u.urlopen(B+p.urlencode({'size':n,'from':f}),timeout=30)); \
+        T=get(0,1)['hits']['total']['value']; \
+        ts=[h['_source'].get('payload',{}).get('ingested','')[:13] for f in range(0,T,1000) for h in get(f,1000)['hits']['hits']]; \
+        print(T,'docs; newest hour:',max(ts),'| last hours with activity:',sorted(collections.Counter(t for t in ts if t).items())[-4:])" \
+        "$DEV_DELIVERY_URL"
 
 - [ ] **A canary publish on the dev mesh reached the index** — published one page
       and confirmed a *changed* `payload.ingested`, not merely that the document
