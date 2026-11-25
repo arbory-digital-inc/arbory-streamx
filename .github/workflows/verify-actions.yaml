@@ -137,7 +137,14 @@ jobs:
     runs-on: ubuntu-latest
     # Skipped until a delivery URL is configured, so a fresh copy of this repo in
     # another org is green rather than red-on-arrival.
-    if: vars.STREAMX_DELIVERY_URL != ''
+    #
+    # `startsWith(..., 'https://')`, NOT `!= ''`. A placeholder is not empty:
+    # a variable left at a literal like `FPO` or `TODO-SET-ME` passed the
+    # emptiness test, was handed to curl as a base URL, and failed on exit 6
+    # resolving a host by that name. One sibling repo failed every publish that
+    # way for days because non-empty read as configured. Testing the SHAPE of the
+    # value leaves exactly two states: not configured yet, and configured.
+    if: startsWith(vars.STREAMX_DELIVERY_URL, 'https://')
     steps:
       - uses: actions/checkout@v7
 
@@ -150,7 +157,7 @@ jobs:
           set -euo pipefail
           subject="$(curl --fail --silent --show-error --location --max-time 45 \
             --get --data-urlencode 'size=1' \
-            "${{ vars.STREAMX_DELIVERY_URL }}/search/pages/" \
+            "${{ vars.STREAMX_DELIVERY_URL }}/search/eds-pages/" \
             | jq -r '.hits.hits[0]._id // empty')"
           if [ -z "$subject" ]; then
             echo "::error::The index returned no documents, so there is nothing to verify against."

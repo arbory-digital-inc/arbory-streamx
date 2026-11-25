@@ -7,14 +7,39 @@
 ### Mac OS ###
 .DS_Store
 
-# Ignore user plaintext secrets
-/mesh/secrets/plaintext/*.properties
+# ─── StreamX secrets ───────────────────────────────────────────────────────────
+# Secrets are committed ENCRYPTED and edited in PLAINTEXT, so exactly one of the
+# two directories may ever reach git:
+#   mesh/secrets/encrypted/  TRACKED. mesh.yaml reads its files by name
+#                            (environmentFrom.secrets); ignoring them breaks the deploy.
+#   mesh/secrets/plaintext/  IGNORED. The pre-encryption source, in the clear.
+# Ignored by directory, not by `*.properties`, so a secret dropped there in any
+# other format is covered too.
+/mesh/secrets/plaintext/*
+!/mesh/secrets/plaintext/.gitkeep
+/mesh/secrets/generated/
+
+# Tokens and keys never live in this repo: the ingestion token and the URLs are
+# GitHub secrets and variables on the repository that publishes.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+id_rsa*
 
 # Ignore generated files
 /target
 **/repository
-/mesh/repository/
-/mesh/secrets/generated/
 
 # Ignore test data
 /data
+
+# Tooling
+__pycache__/
+*.pyc
+.venv/
+
+# Per-session git worktrees and local agent settings
+.claude/worktrees/
+.claude/settings.local.json
