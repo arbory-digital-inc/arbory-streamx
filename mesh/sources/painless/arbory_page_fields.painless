@@ -118,11 +118,19 @@ if (year >= 1990 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day
   year = 0;
 }
 
-/* content type, from the path: /{locale}/blog/... or a legacy /podcast/... */
+/*
+ * content type, from the path: /{locale}/blog/... or a legacy /podcast/...
+ * A page from another site is keyed `<namespace>://<host>/<path>`; its host is
+ * not a path segment, so it is removed first (see skip_page).
+ */
 Map sections = ['blog': 'Article', 'podcast': 'Podcast', 'customer-stories': 'Customer story', 'events': 'Event'];
 String subject = ctx._id == null ? '' : ctx._id.toString();
 int colon = subject.indexOf(':');
 String path = (colon < 0 ? subject : subject.substring(colon + 1)).toLowerCase();
+if (path.startsWith('//')) {
+  int slash = path.indexOf('/', 2);
+  path = slash < 0 ? '' : path.substring(slash);
+}
 String contentType = 'Page';
 int seen = 0;
 for (String part : path.splitOnToken('/')) {
