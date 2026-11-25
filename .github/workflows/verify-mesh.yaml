@@ -62,6 +62,22 @@ jobs:
             || { echo "::error::rejected the outage mesh, but not for the expected reasons:"; cat /tmp/out.txt; exit 1; }
           echo "ok: the outage mesh is still rejected, for both of its original faults."
 
+  migrations:
+    name: Service-init migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The painless and the search template live readable under mesh/sources/
+      # and are built into .http migrations. This fails when a committed
+      # migration is not what its sources build, and when a migration that has
+      # already run on the mesh (scripts/mesh/APPLIED.sha256) has changed, which
+      # would fail its checksum at sink startup and block every later one.
+      # scripts/mesh/test_search_local.py runs them against a real OpenSearch;
+      # it needs one, so it is run by hand before a PR, not here.
+      - name: Migrations match their sources, and applied ones are unchanged
+        run: python3 scripts/mesh/build-migrations.py check
+
   tools:
     name: Search tools
     runs-on: ubuntu-latest
