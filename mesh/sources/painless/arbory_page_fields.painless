@@ -1,0 +1,269 @@
+/*
+ * Turn what the producer extracted from a page's <head> into the fields the
+ * search page reads: payload.description, payload.date, and five facet families.
+ *
+ * INPUT. mesh/configs/indexable-resources-producer.yaml extracts each value with
+ * `facet: true` and a fixed key, which emits three copies of every value:
+ *     payload.facets.<key>_level0      (string, or a list if the meta repeats)
+ *     payload.facets.<key>_hierarchy   (array)
+ *     payload.facets.<key>_path        (string)
+ * Keys: description, date, category, author, and tag1..tag16 (one per
+ * <meta property="article:tag">, by position: a fixed key keeps only the LAST
+ * element its selector matched, so positional predicates are how a page keeps
+ * more than one tag). `eds` and `searchtags` may add others.
+ *
+ * OUTPUT. Everything under payload.facets is removed first, then:
+ *     payload.description           the meta description, unless already set
+ *     payload.date                  yyyy-MM-dd, parsed from the authored date
+ *     payload.facets.content_type_level0   [Article|Podcast|Customer story|Event|Page]
+ *     payload.facets.topic_level0          from `category`, plus community-event tags
+ *     payload.facets.technology_level0     curated from `article:tag`
+ *     payload.facets.year_level0           from the parsed date
+ *     payload.facets.author_level0         from `author`, split on , & and .
+ *     payload.facets.category_hierarchy    every value above, for filter_query
+ * Nothing unmapped survives: a raw tag that is not in a list below is dropped, so
+ * a typo or an internal tag can never become a facet value.
+ *
+ * NOTHING IN THIS FILE MAY CONTAIN A MUSTACHE TAG. It is only used in the ingest
+ * pipeline today, but keep it embeddable.
+ */
+if (ctx.payload == null) {
+  return;
+}
+if (ctx.payload.facets == null) {
+  ctx.payload.facets = new HashMap();
+}
+Map facets = ctx.payload.facets;
+
+/* Read every value the producer wrote for one key, as a list of trimmed strings. */
+Map raw = new HashMap();
+for (def entry : facets.entrySet()) {
+  String key = entry.getKey().toString();
+  if (!key.endsWith('_level0')) {
+    continue;
+  }
+  String name = key.substring(0, key.length() - 7);
+  List values = new ArrayList();
+  def v = entry.getValue();
+  if (v instanceof List) {
+    for (def item : v) {
+      if (item != null) {
+        values.add(item.toString().replace(String.valueOf((char) 160), ' ').trim());
+      }
+    }
+  } else if (v != null) {
+    values.add(v.toString().replace(String.valueOf((char) 160), ' ').trim());
+  }
+  raw.put(name, values);
+}
+facets.clear();
+
+/* description */
+List descriptions = raw.containsKey('description') ? raw.get('description') : new ArrayList();
+def existing = ctx.payload.description;
+if ((existing == null || existing.toString().length() == 0) && !descriptions.isEmpty() && descriptions.get(0).length() > 0) {
+  ctx.payload.description = descriptions.get(0);
+}
+
+/* date: "8 January 2025", "January 8, 2025", "Oct 29, 2025", "4/29/2024", "2025-01-08" */
+Map months = ['jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12];
+int year = 0;
+int month = 0;
+int day = 0;
+List dates = raw.containsKey('date') ? raw.get('date') : new ArrayList();
+if (!dates.isEmpty()) {
+  try {
+  String d = dates.get(0).toLowerCase().replace(',', ' ').trim();
+  if (d.length() >= 10 && d.charAt(4) == (char) '-' && d.charAt(7) == (char) '-') {
+    year = Integer.parseInt(d.substring(0, 4));
+    month = Integer.parseInt(d.substring(5, 7));
+    day = Integer.parseInt(d.substring(8, 10));
+  } else if (d.indexOf('/') > 0) {
+    String[] p = d.splitOnToken('/');
+    if (p.length == 3) {
+      month = Integer.parseInt(p[0].trim());
+      day = Integer.parseInt(p[1].trim());
+      year = Integer.parseInt(p[2].trim());
+    }
+  } else {
+    List words = new ArrayList();
+    for (String w : d.splitOnToken(' ')) {
+      if (w.length() > 0) {
+        words.add(w);
+      }
+    }
+    if (words.size() == 3) {
+      String a = words.get(0);
+      String b = words.get(1);
+      if (Character.isDigit(a.charAt(0))) {
+        day = Integer.parseInt(a);
+        month = months.containsKey(b.length() >= 3 ? b.substring(0, 3) : b) ? months.get(b.substring(0, 3)) : 0;
+      } else {
+        month = months.containsKey(a.length() >= 3 ? a.substring(0, 3) : a) ? months.get(a.substring(0, 3)) : 0;
+        day = Integer.parseInt(b);
+      }
+      year = Integer.parseInt(words.get(2));
+    }
+  }
+  } catch (Exception e) {
+    /* An unparseable date leaves the page undated rather than failing the page. */
+    year = 0;
+  }
+}
+if (year >= 1990 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+  String mm = month < 10 ? '0' + month : '' + month;
+  String dd = day < 10 ? '0' + day : '' + day;
+  ctx.payload.date = year + '-' + mm + '-' + dd;
+} else {
+  year = 0;
+}
+
+/* content type, from the path: /{locale}/blog/... or a legacy /podcast/... */
+Map sections = ['blog': 'Article', 'podcast': 'Podcast', 'customer-stories': 'Customer story', 'events': 'Event'];
+String subject = ctx._id == null ? '' : ctx._id.toString();
+int colon = subject.indexOf(':');
+String path = (colon < 0 ? subject : subject.substring(colon + 1)).toLowerCase();
+String contentType = 'Page';
+int seen = 0;
+for (String part : path.splitOnToken('/')) {
+  if (part.length() == 0) {
+    continue;
+  }
+  if (sections.containsKey(part)) {
+    contentType = sections.get(part);
+    break;
+  }
+  seen++;
+  if (seen >= 2) {
+    break;
+  }
+}
+
+/* topic, from `category` (comma-joined), plus community events from tags */
+Map topics = [
+  'aem technical help': 'AEM Technical Help', 'technical help': 'AEM Technical Help',
+  'aem news': 'AEM News', 'arbory digital news': 'Arbory Digital News'
+];
+Map eventTags = [
+  'adobe summit': 'Adobe Summit', 'summit 2025': 'Adobe Summit', 'summit': 'Adobe Summit',
+  'adaptto()': 'adaptTo()', 'adaptto': 'adaptTo()',
+  'meetup': 'AEM Meetups', 'aem meetup': 'AEM Meetups', 'adobe user group': 'AEM Meetups',
+  'user groups': 'AEM Meetups', 'aem columbus user group': 'AEM Meetups',
+  'developers live': 'Adobe Developers Live', 'adobedevelopers': 'Adobe Developers Live'
+];
+Map technology = [
+  'aem': 'AEM', 'adobe experience manager': 'AEM', 'cq5': 'AEM', 'day cq': 'AEM', 'adobe cms': 'AEM',
+  'aem architecture': 'AEM', 'aem strategy': 'AEM', 'aem experts': 'AEM',
+  'eds': 'Edge Delivery Services', 'edge delivery': 'Edge Delivery Services',
+  'edge delivery services': 'Edge Delivery Services', 'edge delivery service': 'Edge Delivery Services',
+  'helix': 'Edge Delivery Services', 'franklin': 'Edge Delivery Services',
+  'aem franklin': 'Edge Delivery Services', 'project helix': 'Edge Delivery Services',
+  'aemaacs': 'AEM as a Cloud Service', 'aem cloud': 'AEM as a Cloud Service',
+  'aem cloud service': 'AEM as a Cloud Service', 'aem as a cloud service': 'AEM as a Cloud Service',
+  'cloud manager': 'AEM as a Cloud Service', 'adobe cloud': 'AEM as a Cloud Service',
+  'aem 6.5': 'AEM 6.5 & LTS', 'aem 6.5 lts': 'AEM 6.5 & LTS', 'aem 6.5 2025 edition': 'AEM 6.5 & LTS',
+  'aem 6.6': 'AEM 6.5 & LTS', 'aem 7.0': 'AEM 6.5 & LTS', 'self-hosted': 'AEM 6.5 & LTS',
+  'ams': 'AEM 6.5 & LTS', 'jdk 17': 'AEM 6.5 & LTS', 'jdk 11': 'AEM 6.5 & LTS',
+  'da': 'Document Authoring', 'dark alley': 'Document Authoring', 'document authoring': 'Document Authoring',
+  'universal editor': 'Document Authoring', 'da docs': 'Document Authoring',
+  'cdn': 'CDN & Dispatcher', 'managed cdn': 'CDN & Dispatcher', 'dispatcher': 'CDN & Dispatcher',
+  'redirects': 'CDN & Dispatcher',
+  'performance': 'Performance', 'webperf': 'Performance', 'china': 'Performance', 'chinafy': 'Performance',
+  'observability': 'Observability', 'datadog': 'Observability', 'splunk': 'Observability',
+  'new relic': 'Observability', 'logs': 'Observability', 'logging': 'Observability',
+  'log aggregation': 'Observability', 'logs tail': 'Observability',
+  'ci/cd': 'DevOps & CI/CD', 'devops': 'DevOps & CI/CD', 'deployment': 'DevOps & CI/CD',
+  'terraform': 'DevOps & CI/CD', 'github': 'DevOps & CI/CD', 'bitbucket': 'DevOps & CI/CD',
+  'replication': 'Replication & Publishing', 'tree activation': 'Replication & Publishing',
+  'publish': 'Replication & Publishing', 'author bus': 'Replication & Publishing',
+  'ai': 'AI & LLM Optimization', 'llmo': 'AI & LLM Optimization', 'llm optimization': 'AI & LLM Optimization',
+  'vibe-coding': 'AI & LLM Optimization', 'geo': 'AI & LLM Optimization',
+  'seo': 'SEO', 'sites optimizer': 'SEO',
+  'dynamic media': 'Dynamic Media', 'content hub': 'Dynamic Media',
+  'streamx': 'StreamX', 'event streaming': 'StreamX', 'digital experience mesh': 'StreamX',
+  'finops': 'FinOps', 'cloud cost': 'FinOps', 'savings': 'FinOps',
+  'composable': 'Composable architecture', 'composability': 'Composable architecture',
+  'microservices': 'Composable architecture', 'monoliths': 'Composable architecture',
+  'modular': 'Composable architecture'
+];
+
+List topicValues = new ArrayList();
+List categories = raw.containsKey('category') ? raw.get('category') : new ArrayList();
+for (String c : categories) {
+  for (String part : c.splitOnToken(',')) {
+    String k = part.trim().toLowerCase();
+    if (topics.containsKey(k) && !topicValues.contains(topics.get(k))) {
+      topicValues.add(topics.get(k));
+    }
+  }
+}
+
+List techValues = new ArrayList();
+for (def entry : raw.entrySet()) {
+  String name = entry.getKey().toString();
+  if (!name.startsWith('tag')) {
+    continue;
+  }
+  for (String t : entry.getValue()) {
+    String k = t.toLowerCase().trim();
+    if (technology.containsKey(k) && !techValues.contains(technology.get(k))) {
+      techValues.add(technology.get(k));
+    }
+    if (eventTags.containsKey(k) && !topicValues.contains(eventTags.get(k))) {
+      topicValues.add(eventTags.get(k));
+    }
+  }
+}
+
+/* author: "Tad Reeves, Hank Thobe", "Hank Thobe & Chase Hollander", "Tad Reeves. Drew ..." */
+List authorValues = new ArrayList();
+List authors = raw.containsKey('author') ? raw.get('author') : new ArrayList();
+for (String a : authors) {
+  String s = a.replace('&', ',').replace('. ', ',').replace(';', ',');
+  for (String part : s.splitOnToken(',')) {
+    String name = part.trim();
+    if (name.endsWith('.')) {
+      name = name.substring(0, name.length() - 1).trim();
+    }
+    if (name.length() < 2) {
+      continue;
+    }
+    /* "hank Thobe" -> "Hank Thobe": capitalise the first letter of each word */
+    StringBuilder out = new StringBuilder();
+    boolean start = true;
+    for (int i = 0; i < name.length(); i++) {
+      char ch = name.charAt(i);
+      if (start && Character.isLetter(ch)) {
+        out.append(Character.toUpperCase(ch));
+      } else {
+        out.append(ch);
+      }
+      start = ch == (char) ' ';
+    }
+    String clean = out.toString();
+    if (!authorValues.contains(clean)) {
+      authorValues.add(clean);
+    }
+  }
+}
+
+List all = new ArrayList();
+facets.put('content_type_level0', [contentType]);
+all.add(contentType);
+if (!topicValues.isEmpty()) {
+  facets.put('topic_level0', topicValues);
+  all.addAll(topicValues);
+}
+if (!techValues.isEmpty()) {
+  facets.put('technology_level0', techValues);
+  all.addAll(techValues);
+}
+if (year > 0) {
+  facets.put('year_level0', ['' + year]);
+  all.add('' + year);
+}
+if (!authorValues.isEmpty()) {
+  facets.put('author_level0', authorValues);
+  all.addAll(authorValues);
+}
+facets.put('category_hierarchy', all);

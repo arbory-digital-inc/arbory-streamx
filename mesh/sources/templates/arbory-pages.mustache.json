@@ -1,0 +1,109 @@
+{
+  "_source": [
+    "_id",
+    "payload.title",
+    "payload.description",
+    "payload.date",
+    "payload.ingested",
+    "payload.facets.content_type_level0",
+    "fragments.*",
+    "type",
+    "namespace"
+  ],
+  "from": {{from}}{{^from}}0{{/from}},
+  {{#size}}"size": "{{size}}",{{/size}}
+  {{^size}}"size": "50",{{/size}}
+  {{#sort}}
+  "sort": [
+    {
+      "_script": {
+        "type": "number",
+        "order": "asc",
+        "script": {
+          "lang": "painless",
+          "source": "@@PAINLESS:sort_by_date@@",
+          "params": { "spec": "{{sort}}" }
+        }
+      }
+    }
+  ],
+  {{/sort}}
+  "query": {
+    "bool": {
+      "filter": [
+        { "regexp": { "type.keyword": ".*page.*" } }
+        {{#filter_query}}, {{#fields}} { "terms": { "payload.facets.{{name}}.keyword": {{#toJson}}values{{/toJson}} } }{{^last}},{{/last}} {{/fields}} {{/filter_query}}
+      ],
+      "must": [
+        { "match_all": {} },
+        { "bool": { "must_not": { "regexp": { "type.keyword": ".*fragment.*" } } } }
+        {{#namespace}}, { "prefix": { "namespace.keyword": { "case_insensitive": true, "value": "{{namespace}}" } } } {{/namespace}}
+        {{#query}},
+        {{^operators}}
+        {
+          "bool": {
+            "should": [
+              { "match_bool_prefix": { "payload.title":       { "query": "{{query}}" } } },
+              { "match_bool_prefix": { "payload.description": { "query": "{{query}}" } } },
+              { "match_bool_prefix": { "payload.content":     { "query": "{{query}}" } } },
+              { "nested": { "path": "fragments", "query": { "bool": { "should": [ { "match_bool_prefix": { "fragments.payload.content": { "query": "{{query}}" } } } ] } } } }
+            ]
+          }
+        },
+        {{/operators}}
+        {{#operators}}
+        {
+          "bool": {
+            "should": [
+              {{#any_of}}
+              { "bool": { "must": [
+                {{#all_of}}
+                { "bool": { "must": [
+                  {{#text}}
+                  { "bool": { "should": [
+                    { "match_bool_prefix": { "payload.title":       { "query": "{{text}}" } } },
+                    { "match_bool_prefix": { "payload.description": { "query": "{{text}}" } } },
+                    { "match_bool_prefix": { "payload.content":     { "query": "{{text}}" } } },
+                    { "nested": { "path": "fragments", "query": { "bool": { "should": [ { "match_bool_prefix": { "fragments.payload.content": { "query": "{{text}}" } } } ] } } } }
+                  ] } }{{#has_phrases}},{{/has_phrases}}
+                  {{/text}}
+                  {{#phrases}}
+                  { "bool": { "should": [
+                    { "match_phrase": { "payload.title":       { "query": "{{phrase}}" } } },
+                    { "match_phrase": { "payload.description": { "query": "{{phrase}}" } } },
+                    { "match_phrase": { "payload.content":     { "query": "{{phrase}}" } } },
+                    { "nested": { "path": "fragments", "query": { "bool": { "should": [ { "match_phrase": { "fragments.payload.content": { "query": "{{phrase}}" } } } ] } } } }
+                  ] } }{{^last_phrase}},{{/last_phrase}}
+                  {{/phrases}}
+                ] } }{{^last_term}},{{/last_term}}
+                {{/all_of}}
+              ] } }{{^last_group}},{{/last_group}}
+              {{/any_of}}
+            ]
+          }
+        },
+        {{/operators}}
+        { "bool": { "filter": [ { "match_all": {} } ], "should": [ { "match": { "payload.title": { "query": "{{query}}", "boost": 2 } } } ] } },
+        { "bool": { "filter": [ { "match_all": {} } ], "should": [ { "multi_match": { "query": "{{query}}", "type": "most_fields", "fields": [ "payload.facets.topic_level0", "payload.facets.technology_level0" ], "boost": 2 } } ] } }
+        {{/query}}
+      ]
+    }
+  },
+  "highlight": {
+    "fields": {
+      "payload.title": {},
+      "payload.description": {},
+      "payload.content": {},
+      "fragments.payload.content": {}
+    }
+  },
+  "track_scores": true,
+  "aggs": {
+    "content_type_level0": { "terms": { "field": "payload.facets.content_type_level0.keyword", "size": 20 } },
+    "topic_level0":        { "terms": { "field": "payload.facets.topic_level0.keyword",        "size": 50 } },
+    "technology_level0":   { "terms": { "field": "payload.facets.technology_level0.keyword",   "size": 50 } },
+    "year_level0":         { "terms": { "field": "payload.facets.year_level0.keyword",         "size": 30 } },
+    "author_level0":       { "terms": { "field": "payload.facets.author_level0.keyword",       "size": 60 } }
+    {{#facets}}, {{#fields}} "{{name}}": { "terms": { "field": "payload.facets.{{name}}.keyword", "size": {{size}}{{^size}}20{{/size}} } {{#children}}, "aggs": { "{{name}}": { "terms": { "field": "payload.facets.{{name}}.keyword", "size": {{size}}{{^size}}20{{/size}} } {{#children}}, "aggs": { "{{name}}": { "terms": { "field": "payload.facets.{{name}}.keyword", "size": {{size}}{{^size}}20{{/size}} } } } {{/children}} }{{^last}},{{/last}} } {{/children}} }{{^last}},{{/last}} {{/fields}} {{/facets}}
+  }
+}

@@ -12,6 +12,7 @@ index and search-template migrations, and the GitHub Actions that publish into i
 | `mesh/` | Mesh definition, service configs, and `service-init` migrations (run at sink startup, in version order). |
 | `scripts/vendor/` | Guards and sync tooling for the vendored actions. |
 | `scripts/reindex/` | Rebuild an index by re-publishing a site. |
+| `mesh/sources/`, `scripts/mesh/build-migrations.py` | Readable sources (painless, search templates, mappings) for the `service-init` migrations, and the builder that writes them; `test_search_local.py` runs every migration against a local OpenSearch and exercises the search page's requests. |
 | `scripts/search/watch_search.py` | Watch search on one or more edges through a deploy or a region move; reports each edge's longest outage. |
 
 Note that merges to `main` trigger a mesh redeploy — this repository is the

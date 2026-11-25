@@ -223,6 +223,12 @@ processing:
             ref: outbox.indexable-resource-fragments
         environment:
           QUARKUS_CONFIG_LOCATIONS: "/deployments/config/application.yaml"
+          # RESTART LEVER. Bump in the SAME COMMIT as any change to
+          # configs/indexable-resources-producer.yaml. Nothing reads it; changing it
+          # changes the pod spec, which rolls the producer. A mounted config is not
+          # part of the pod spec, so nothing guarantees an edit to that file alone
+          # restarts the service to read it (docs/deploying.md, "The restart lever").
+          PRODUCER_RESTART_LEVER: "1"
         volumesFrom:
           configs:
             - "indexable-resources-producer.yaml:/deployments/config/application.yaml"
