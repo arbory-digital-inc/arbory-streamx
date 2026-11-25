@@ -1,0 +1,57 @@
+{
+  "_source": [
+    "_id",
+    "payload.title",
+    "payload.description",
+    "payload.date",
+    "payload.image",
+    "payload.facets.content_type_level0",
+    "payload.facets.author_level0",
+    "namespace"
+  ],
+  {{#size}}"size": "{{size}}",{{/size}}
+  {{^size}}"size": "3",{{/size}}
+  "query": {
+    "bool": {
+      "filter": [
+        { "regexp": { "type.keyword": ".*page.*" } },
+        { "term": { "namespace.keyword": { "value": "{{namespace}}", "case_insensitive": true } } }
+        {{#content_type}}, { "term": { "payload.facets.content_type_level0.keyword": "{{content_type}}" } }{{/content_type}}
+      ],
+      "must_not": [
+        { "regexp": { "type.keyword": ".*fragment.*" } }
+        {{#exclude}}, { "ids": { "values": [ "{{exclude}}" ] } }{{/exclude}}
+      ],
+      "must": [
+        {
+          "more_like_this": {
+            "fields": [ "payload.title", "payload.description", "payload.content" ],
+            "like": [
+              {{#id}}{ "_id": "{{id}}" }{{#text}},{{/text}}{{/id}}
+              {{#text}}"{{text}}"{{/text}}
+            ],
+            "min_term_freq": 1,
+            "min_doc_freq": 2,
+            "max_query_terms": 40,
+            "min_word_length": 3,
+            "minimum_should_match": "{{minimum_should_match}}{{^minimum_should_match}}10%{{/minimum_should_match}}"
+          }
+        }
+      ],
+      "should": [
+        { "more_like_this": {
+            "fields": [ "payload.title" ],
+            "like": [
+              {{#id}}{ "_id": "{{id}}" }{{#text}},{{/text}}{{/id}}
+              {{#text}}"{{text}}"{{/text}}
+            ],
+            "min_term_freq": 1,
+            "min_doc_freq": 1,
+            "max_query_terms": 12,
+            "min_word_length": 3,
+            "boost": 2
+        } }
+      ]
+    }
+  }
+}

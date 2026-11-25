@@ -11,6 +11,7 @@
           "type": "text",
           "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } }
         },
+        "image": { "type": "keyword", "index": false },
         "facets": {
           "properties": {
             "content_type_level0": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },

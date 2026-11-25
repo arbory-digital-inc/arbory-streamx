@@ -11,7 +11,9 @@ This runs that startup on a throwaway local OpenSearch first:
   2. indexes real pages through the `default-local` pipeline, shaped the way the
      producer emits them (payload.facets.<key>_level0/_hierarchy/_path);
   3. runs the search page's request bodies through the `arbory-pages` template
-     and asserts on the results, facets, sort and filters.
+     and asserts on the results, facets, sort and filters;
+  4. asks `arbory-mlt` (the search-mlt-suggestions block) for articles like a
+     real one, in English and German, and asserts they stay in that language.
 
     # a single-node OpenSearch 2.16 on localhost:9200 with security disabled, then
     python3 scripts/mesh/test_search_local.py [--opensearch http://localhost:9200]
@@ -99,6 +101,8 @@ def producer_doc(path, page_html, namespace='en'):
         a = attrs(m)
         if a.get('property') == 'article:tag':
             tags.append(a.get('content', ''))
+        elif a.get('property') == 'og:image':
+            named['image'] = a.get('content', '')
         elif a.get('name') in ('description', 'date', 'category', 'author'):
             named[a['name']] = a.get('content', '')
     facets = {}
@@ -130,6 +134,7 @@ def main(argv=None):
     ap.add_argument('--pages', type=int, default=60)
     ap.add_argument('--www-site', default='https://main--arbory-www--arbory-digital-inc.aem.live',
                     help='the apex site, indexed alongside the blog as en://arborydigital.com/<path>')
+    ap.add_argument('--de-pages', type=int, default=25, help='German pages, for the same-language checks')
     args = ap.parse_args(argv)
     base = args.opensearch.rstrip('/')
     if urllib.parse.urlsplit(base).hostname not in ('localhost', '127.0.0.1'):
@@ -276,6 +281,79 @@ def main(argv=None):
                         {'id': 'eds-pages', 'params': {'query': 'aem', 'size': 5}})
     check(status == 200 and all('ingested' in h['_source']['payload'] for h in resp['hits']['hits']),
           'eds-pages (verify-indexed) still projects payload.ingested')
+
+    print('Index German pages, for the same-language checks:')
+    de_index = json.loads(get(args.site + '/de-index.json?limit=1000'))['data']
+    de_paths = [r['path'] for r in de_index][:args.de_pages]
+    for path in de_paths:
+        try:
+            page = get(args.site + path)
+        except Exception as e:
+            print(f'  skip  {path}: {e}')
+            continue
+        doc_id = urllib.parse.quote(f'de:{path}', safe='')
+        call(base, 'PUT', f'/default/_doc/{doc_id}', producer_doc(path, page, 'de'))
+    call(base, 'POST', '/default/_refresh')
+
+    imaged = [s for s in docs.values() if s['payload'].get('image')]
+    check(len(imaged) >= len(docs) * 0.6, f'{len(imaged)}/{len(docs)} documents carry payload.image')
+    check(all(s['payload']['image'].startswith('/') for s in imaged
+              if '.aem.live/' in s['payload']['image'] or s['payload']['image'].startswith('/')),
+          'own-site images are stored as paths')
+    status, resp = call(base, 'GET', '/default/_mapping')
+    image_map = resp.get('default', {}).get('mappings', {}).get('properties', {}).get('payload', {}) \
+        .get('properties', {}).get('image', {})
+    check(image_map.get('type') == 'keyword' and image_map.get('index') is False,
+          f'payload.image is a stored-only keyword: {image_map}')
+
+    def mlt(params):
+        status, resp = call(base, 'POST', '/default/_search/template', {'id': 'arbory-mlt', 'params': params})
+        if status != 200:
+            check(False, f'mlt {json.dumps(params)[:160]} -> {status} {json.dumps(resp)[:400]}')
+            return None
+        return resp
+
+    print('More like this through arbory-mlt:')
+    seed = next((p for p in paths if '/blog/' in p), paths[0])
+    seed_id = f'en:{seed}'
+    r = mlt({'id': seed_id, 'namespace': 'en', 'size': 3})
+    if r:
+        hits = r['hits']['hits']
+        print(f'    like {seed}:')
+        for h in hits:
+            print(f'      {h["_score"]:.2f}  {h["_id"]}  {h["_source"]["payload"].get("title")}')
+        check(len(hits) == 3, f'three suggestions for {seed}')
+        check(seed_id not in [h['_id'] for h in hits], 'the article itself is never suggested')
+        check(all(h['_source']['namespace'] == 'en' for h in hits), 'English suggestions only')
+        check(all('content' not in h['_source']['payload'] for h in hits), '_source does not carry payload.content')
+    r = mlt({'id': 'en:/en/blog/not-indexed-yet', 'text': 'Edge Delivery Services document authoring', 'namespace': 'en'})
+    if r:
+        check(len(r['hits']['hits']) > 0, 'an article missing from the index still gets suggestions from its text')
+    r = mlt({'text': 'Edge Delivery Services document authoring', 'namespace': 'en',
+             'exclude': seed_id, 'size': 50})
+    if r:
+        check(seed_id not in [h['_id'] for h in r['hits']['hits']], '`exclude` keeps a document out')
+    r = mlt({'text': 'AEM upgrades', 'namespace': 'en', 'size': 6, 'content_type': 'Customer story'})
+    if r:
+        check(all(h['_source']['payload']['facets']['content_type_level0'] == ['Customer story']
+                  for h in r['hits']['hits']), '`content_type` narrows to one content type')
+    de_seed = f'de:{de_paths[0]}' if de_paths else None
+    if de_seed:
+        r = mlt({'id': de_seed, 'namespace': 'de', 'size': 3})
+        if r:
+            hits = r['hits']['hits']
+            print(f'    like {de_seed}:')
+            for h in hits:
+                print(f'      {h["_score"]:.2f}  {h["_id"]}  {h["_source"]["payload"].get("title")}')
+            check(len(hits) > 0 and all(h['_source']['namespace'] == 'de' for h in hits),
+                  'a German article gets German suggestions only')
+        r = mlt({'id': seed_id, 'namespace': 'de', 'size': 10})
+        if r:
+            check(all(h['_source']['namespace'] == 'de' for h in r['hits']['hits']),
+                  'namespace decides the language, whatever the seed')
+    r = mlt({'text': 'AEM Edge Delivery', 'namespace': 'zh'})
+    if r:
+        check(r['hits']['total']['value'] == 0, 'namespace is exact: zh does not match zh-cn or zh-tw')
 
     print()
     print('FAILED: ' + '; '.join(FAILURES) if FAILURES else 'All checks passed.')

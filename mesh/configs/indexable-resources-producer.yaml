@@ -63,6 +63,18 @@ streamx:
                 - name: lowercase
               value-processors:
                 - name: trim
+            # og:image, for the more-like-this cards (search-mlt-suggestions). The
+            # pipeline keeps only its path when the site itself serves it.
+            image:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@property='og:image']"
+              key: "image"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
             date:
               facet: true
               element-selector: "//*[local-name()='meta'][@name='date']"
