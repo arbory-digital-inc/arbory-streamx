@@ -27,5 +27,8 @@ clusters:
     enabled: true
     overlay: {}
   ap-southeast-sin-edge:
+    enabled: false
+    overlay: {}
+  eu-south-mil-edge:
     enabled: true
     overlay: {}
