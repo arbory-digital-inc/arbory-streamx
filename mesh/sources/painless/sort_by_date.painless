@@ -1,0 +1,44 @@
+/*
+ * Date sort for the search template. `params.spec` is the raw `sort` parameter
+ * the front end sends: "date:desc" (its only value today) or "date:asc".
+ *
+ * WHY A SCRIPT SORT rather than {"payload.date":{"order":"desc"}}.
+ * A search template is mustache over JSON and cannot branch on a parameter's
+ * VALUE, so a plain field sort would have to hardcode one direction and silently
+ * ignore the other. Silently is the problem: the reference deployment accepts
+ * `sort` today, returns a clean 200 and changes nothing, because the parameter is
+ * not in its template at all. The toggle flips, the URL updates, the order does
+ * not change, and nothing logs. A script reads the direction instead.
+ *
+ * UNDATED DOCUMENTS SORT LAST IN BOTH DIRECTIONS. Pages without a date —
+ * hub pages, landing pages, fragments — treating them as
+ * very old or very new would hand the reader a screenful of them at one end. The sort
+ * runs ascending over this script's output, so Long.MAX_VALUE is "last" whichever
+ * direction was asked for, and descending is expressed by negating the millis
+ * rather than by flipping the sort.
+ *
+ * RELEVANCE IS THE DEFAULT and is the ABSENCE of a sort: the template emits this
+ * clause only inside its `sort` section, so with no parameter the index answers
+ * in _score order.
+ *
+ * NOTHING IN THIS FILE MAY CONTAIN A MUSTACHE TAG, not even in a comment. This
+ * script is embedded INSIDE the search template, so the template engine parses
+ * these comments too: a stray section opener here pairs with the template's own
+ * closer and the template stops compiling. scripts/mesh/build-migrations.py refuses to build it.
+ */
+String spec = '';
+if (params.spec != null) {
+  spec = params.spec;
+}
+if (!doc.containsKey('payload.date')) {
+  return Long.MAX_VALUE;
+}
+def field = doc['payload.date'];
+if (field.size() == 0) {
+  return Long.MAX_VALUE;
+}
+long millis = field.value.toInstant().toEpochMilli();
+if (spec.endsWith(':asc')) {
+  return millis;
+}
+return -millis;

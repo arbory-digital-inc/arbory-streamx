@@ -40,3 +40,216 @@ streamx:
               value-processors:
                 - name: trim
 
+            # ── Search page fields (arbory-pages) ─────────────────────────────────
+            # Read from the page <head> that EDS renders from the page metadata. Each
+            # lands in payload.facets as <key>_level0/_hierarchy/_path, and the
+            # ingest pipeline's `arbory_page_fields` processor turns them into
+            # payload.description, payload.date and the five facet families
+            # (mesh/sources/painless/arbory_page_fields.painless), then removes them.
+            #
+            # XPath here fails SILENTLY on anything the producer does not support:
+            # starts-with() and positional predicates work; contains() and `and`
+            # inside a predicate return nothing (probed 2026-09-17). A fixed `key`
+            # keeps only the LAST element its selector matched, so tags are read one
+            # position at a time: (//meta[@property='article:tag'])[k], k = 1..16
+            # (the most tags any page carried on 2026-11-25 was 16).
+            description:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@name='description']"
+              key: "description"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            date:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@name='date']"
+              key: "date"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            category:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@name='category']"
+              key: "category"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            author:
+              facet: true
+              element-selector: "//*[local-name()='meta'][@name='author']"
+              key: "author"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag1:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[1]"
+              key: "tag1"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag2:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[2]"
+              key: "tag2"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag3:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[3]"
+              key: "tag3"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag4:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[4]"
+              key: "tag4"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag5:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[5]"
+              key: "tag5"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag6:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[6]"
+              key: "tag6"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag7:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[7]"
+              key: "tag7"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag8:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[8]"
+              key: "tag8"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag9:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[9]"
+              key: "tag9"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag10:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[10]"
+              key: "tag10"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag11:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[11]"
+              key: "tag11"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag12:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[12]"
+              key: "tag12"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag13:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[13]"
+              key: "tag13"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag14:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[14]"
+              key: "tag14"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag15:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[15]"
+              key: "tag15"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim
+            tag16:
+              facet: true
+              element-selector: "(//*[local-name()='meta'][@property='article:tag'])[16]"
+              key: "tag16"
+              value-selector: "./@content"
+              key-processors:
+                - name: trim
+                - name: lowercase
+              value-processors:
+                - name: trim

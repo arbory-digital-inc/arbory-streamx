@@ -1,0 +1,54 @@
+/*
+ * True for a document that must never be searchable. It is the condition of the
+ * pipeline's first processor, a `drop`, so a match is removed before anything is
+ * written.
+ *
+ * WHAT IT READS. The document id, which is the CloudEvent subject:
+ * `<namespace>:<path>`, e.g. `en:/en/blog/some-post`. The path is everything after
+ * the first colon. Roots match as whole segments, so /drafts and /drafts/x match
+ * and /drafts-and-plans does not.
+ *
+ * WHAT IT DROPS
+ *   - drafts:     any segment named `drafts` (/drafts/..., /en/drafts/...)
+ *   - building blocks that are published but are not pages a reader should land
+ *     on: any segment named `fragments`, and a last segment of `nav` or `footer`
+ *   - the language-copy staging area: a first segment of `langstore`
+ *   - duplicated pages: a last segment ending in `-copy` (DA's copy-paste
+ *     default), which otherwise show twice in results next to their originals
+ *
+ * A DROP ONLY STOPS A WRITE. A copy indexed before this rule existed stays until
+ * it is withdrawn; republishing it is now dropped too and replaces nothing.
+ *
+ * Fails open: the processor carries ignore_failure, so if this ever throws, the
+ * page is indexed rather than every page being rejected.
+ */
+def raw = ctx._id;
+if (raw == null) {
+  return false;
+}
+String subject = raw.toString();
+int colon = subject.indexOf(':');
+String path = (colon < 0 ? subject : subject.substring(colon + 1)).toLowerCase();
+
+List segments = new ArrayList();
+for (String part : path.splitOnToken('/')) {
+  if (part.length() > 0) {
+    segments.add(part);
+  }
+}
+if (segments.isEmpty()) {
+  return false;
+}
+for (def segment : segments) {
+  if (segment == 'drafts' || segment == 'fragments') {
+    return true;
+  }
+}
+if (segments.get(0) == 'langstore') {
+  return true;
+}
+String last = segments.get(segments.size() - 1);
+if (last == 'nav' || last == 'footer' || last.endsWith('-copy')) {
+  return true;
+}
+return false;
