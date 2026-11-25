@@ -15,6 +15,8 @@
  *   - the language-copy staging area: a first segment of `langstore`
  *   - duplicated pages: a last segment ending in `-copy` (DA's copy-paste
  *     default), which otherwise show twice in results next to their originals
+ *   - the site's own tool pages, /<locale>/search and /<locale>/taglist: a
+ *     search for "search" should not answer with the search page
  *
  * A DROP ONLY STOPS A WRITE. A copy indexed before this rule existed stays until
  * it is withdrawn; republishing it is now dropped too and replaces nothing.
@@ -49,6 +51,9 @@ if (segments.get(0) == 'langstore') {
 }
 String last = segments.get(segments.size() - 1);
 if (last == 'nav' || last == 'footer' || last.endsWith('-copy')) {
+  return true;
+}
+if (segments.size() == 2 && (last == 'search' || last == 'taglist')) {
   return true;
 }
 return false;

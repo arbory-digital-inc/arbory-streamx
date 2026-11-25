@@ -157,7 +157,8 @@ def main(argv=None):
     index = json.loads(get(args.site + '/en-index.json?limit=1000'))['data']
     paths = [r['path'] for r in index if '/blog/' in r['path'] or '/podcast/' in r['path']][:args.pages]
     paths += [r['path'] for r in index if '/customer-stories/' in r['path'] or '/events/' in r['path']][:3]
-    skipped = ['/en/nav', '/en/footer', '/en/fragments/bios/tad-reeves', '/en/drafts/x', '/en/blog/x-copy']
+    skipped = ['/en/nav', '/en/footer', '/en/fragments/bios/tad-reeves', '/en/drafts/x', '/en/blog/x-copy',
+               '/en/search', '/en/taglist']
     for path in paths + skipped:
         try:
             page = get(args.site + path) if path not in skipped else '<title>skip me</title>'
