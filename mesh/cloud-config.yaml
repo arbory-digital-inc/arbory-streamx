@@ -1,5 +1,4 @@
 ---
-domains: []
 global:
   services:
     ingestion:
@@ -19,6 +18,14 @@ global:
         stateful: true
 clusters:
   eu-west-par-edge:
-    enabled: true
+    enabled: false
+    overlay: {}
   eu-west-par-processing:
+    enabled: false
+    overlay: {}
+  eu-south-mil-processing:
     enabled: true
+    overlay: {}
+  ap-southeast-sin-edge:
+    enabled: true
+    overlay: {}
