@@ -8,6 +8,11 @@
  * the first colon. Roots match as whole segments, so /drafts and /drafts/x match
  * and /drafts-and-plans does not.
  *
+ * A page from another site is keyed by its protocol-relative URL instead:
+ * `en://arborydigital.com/en/services/x` (the search page links it as-is, so the
+ * hit opens on its own host). The `//host` is not a path segment: it is removed
+ * before any rule below runs, so every rule applies to every site alike.
+ *
  * WHAT IT DROPS
  *   - drafts:     any segment named `drafts` (/drafts/..., /en/drafts/...)
  *   - building blocks that are published but are not pages a reader should land
@@ -31,6 +36,10 @@ if (raw == null) {
 String subject = raw.toString();
 int colon = subject.indexOf(':');
 String path = (colon < 0 ? subject : subject.substring(colon + 1)).toLowerCase();
+if (path.startsWith('//')) {
+  int slash = path.indexOf('/', 2);
+  path = slash < 0 ? '' : path.substring(slash);
+}
 
 List segments = new ArrayList();
 for (String part : path.splitOnToken('/')) {

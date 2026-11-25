@@ -16,6 +16,7 @@ This runs that startup on a throwaway local OpenSearch first:
     # a single-node OpenSearch 2.16 on localhost:9200 with security disabled, then
     python3 scripts/mesh/test_search_local.py [--opensearch http://localhost:9200]
         [--site https://main--arbory-da--arbory-digital-inc.aem.live] [--pages 60]
+        [--www-site https://main--arbory-www--arbory-digital-inc.aem.live]
 
 DESTRUCTIVE to the target: it deletes and recreates the index `default`. It
 refuses any host but localhost. Standard library only.
@@ -127,6 +128,8 @@ def main(argv=None):
     ap.add_argument('--opensearch', default='http://localhost:9200')
     ap.add_argument('--site', default='https://main--arbory-da--arbory-digital-inc.aem.live')
     ap.add_argument('--pages', type=int, default=60)
+    ap.add_argument('--www-site', default='https://main--arbory-www--arbory-digital-inc.aem.live',
+                    help='the apex site, indexed alongside the blog as en://arborydigital.com/<path>')
     args = ap.parse_args(argv)
     base = args.opensearch.rstrip('/')
     if urllib.parse.urlsplit(base).hostname not in ('localhost', '127.0.0.1'):
@@ -174,6 +177,28 @@ def main(argv=None):
     for path in skipped:
         status, _ = call(base, 'GET', '/default/_doc/' + urllib.parse.quote(f'en:{path}', safe=''))
         check(status == 404, f'dropped by skip_page: {path}')
+
+    print('Index the apex site alongside, keyed by protocol-relative URL:')
+    www_host = '//arborydigital.com'
+    www_pages = {'/en/services/aem-upgrades': 'Page', '/en/about/meet-the-team': 'Page',
+                 '/en/customer-stories/jmp-customer-spotlight': 'Customer story', '/en/index': 'Page'}
+    www_skipped = ['/en/fragments/nav/header', '/en/nav', '/en/search', '/en/services/aem-upgrades-copy']
+    for path in list(www_pages) + www_skipped:
+        try:
+            page = get(args.www_site + path.replace('/index', '/')) if path in www_pages else '<title>skip me</title>'
+        except Exception as e:
+            check(False, f'fetch {args.www_site}{path}: {e}')
+            continue
+        doc_id = urllib.parse.quote(f'en:{www_host}{path}', safe='')
+        status, resp = call(base, 'PUT', f'/default/_doc/{doc_id}?refresh=true', producer_doc(path, page))
+        check(status in (200, 201), f'index en:{www_host}{path} -> {status}')
+    for path in www_skipped:
+        status, _ = call(base, 'GET', '/default/_doc/' + urllib.parse.quote(f'en:{www_host}{path}', safe=''))
+        check(status == 404, f'dropped by skip_page: en:{www_host}{path}')
+    for path, want in www_pages.items():
+        status, resp = call(base, 'GET', '/default/_doc/' + urllib.parse.quote(f'en:{www_host}{path}', safe=''))
+        got = resp.get('_source', {}).get('payload', {}).get('facets', {}).get('content_type_level0') if status == 200 else None
+        check(got == [want], f'en:{www_host}{path} content type {got} == [{want!r}]')
 
     status, resp = call(base, 'POST', '/default/_search', {'size': 500, 'query': {'match_all': {}}})
     docs = {h['_id']: h['_source'] for h in resp['hits']['hits']}
@@ -230,6 +255,16 @@ def main(argv=None):
                                                      {'text': 'delivery', 'last_term': True}], 'last_group': True}]}})
     if r:
         check(r['hits']['total']['value'] > 0, f'operators AND: {r["hits"]["total"]["value"]} hits')
+    r = search({'query': 'upgrades', 'namespace': 'en', 'size': 50})
+    if r:
+        ids = [h['_id'] for h in r['hits']['hits']]
+        check(f'en:{www_host}/en/services/aem-upgrades' in ids, 'the en namespace answers with apex-site pages too')
+        check(any(i.startswith('en:/en/') for i in ids), 'and with blog pages, in the same result list')
+    r = search({'query': 'upgrades', 'namespace': 'en', 'size': 50,
+                'filter_query': {'fields': [{'name': 'category_hierarchy', 'values': ['Customer story'], 'last': True}]}})
+    if r:
+        check(all(h['_source']['payload']['facets']['content_type_level0'] == ['Customer story'] for h in r['hits']['hits']),
+              'filter Customer story keeps both sites\' customer stories only')
     r = search({'query': 'zzqqxxnotaword', 'namespace': 'en'})
     if r:
         check(r['hits']['total']['value'] == 0, 'nonsense query returns nothing')

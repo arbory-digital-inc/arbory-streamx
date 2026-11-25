@@ -79,10 +79,11 @@ def template(template_id: str, source_file: str) -> str:
 
 
 # Migration file -> how to build it. Versions only ever go up; never reuse one.
+# Applied migrations leave this list once pinned: their sources may move on.
 BUILDS = {
-    'V1.0.0.7.7__update_default_index_mapping.http': mapping,
-    'V1.0.0.7.8__update_default_index_default_pipeline.http': pipeline,
-    'V1.0.0.7.9__arbory_pages_search_template.http': lambda: template('arbory-pages', 'arbory-pages.mustache.json'),
+    # Cross-site documents (`en://arborydigital.com/...`): skip_page and the content
+    # type read the path after the host.
+    'V1.0.0.8.0__update_default_index_default_pipeline.http': pipeline,
 }
 
 
