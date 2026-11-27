@@ -13,7 +13,8 @@ This runs that startup on a throwaway local OpenSearch first:
   3. runs the search page's request bodies through the `arbory-pages` template
      and asserts on the results, facets, sort and filters;
   4. asks `arbory-mlt` (the search-mlt-suggestions block) for articles like a
-     real one, in English and German, and asserts they stay in that language.
+     real one, in English and German, and asserts they stay in that language;
+  5. asks `arbory-topics` (the search-topics block) for an article's topic terms.
 
     # a single-node OpenSearch 2.16 on localhost:9200 with security disabled, then
     python3 scripts/mesh/test_search_local.py [--opensearch http://localhost:9200]
@@ -354,6 +355,51 @@ def main(argv=None):
     r = mlt({'text': 'AEM Edge Delivery', 'namespace': 'zh'})
     if r:
         check(r['hits']['total']['value'] == 0, 'namespace is exact: zh does not match zh-cn or zh-tw')
+
+    def topics(params):
+        status, resp = call(base, 'POST', '/default/_search/template', {'id': 'arbory-topics', 'params': params})
+        if status != 200:
+            check(False, f'topics {json.dumps(params)[:160]} -> {status} {json.dumps(resp)[:400]}')
+            return None
+        return resp
+
+    def topic_keys(resp):
+        return [b['key'] for b in resp['aggregations']['neighbourhood']['topics']['buckets']]
+
+    print('Topic pills through arbory-topics:')
+    # A slice of the search-topics block's glossary, sent the way the sink sends
+    # every value: one lowercased string.
+    glossary = ('aemaacs|eds|helix|dispatcher|sling|oak|jcr|osgi|ams|lts|rde|aio|cloudmanager|jdk|java|'
+                'tomcat|cdn|fastly|akamai|splunk|datadog|rum|seo|llm|llms|mcp|streamx|opensearch|sharepoint|'
+                'workfront|aws|azure|devops|finops|logs|logging|upgrade|migration|adaptto')
+    allowed = set(glossary.split('|'))
+    r = topics({'id': seed_id, 'namespace': 'en', 'terms': glossary})
+    if r:
+        keys = topic_keys(r)
+        print(f'    {seed}: {", ".join(keys)}')
+        check(len(keys) > 0, f'topics for {seed}')
+        check(set(keys) <= allowed, 'only glossary terms come back')
+        hits = r['hits']['hits']
+        check(len(hits) == 1 and hits[0]['_id'] == seed_id, 'the one hit is the article itself (for its tags)')
+        check('content' not in hits[0]['_source'].get('payload', {}), '_source does not carry payload.content')
+    r = topics({'id': seed_id, 'namespace': 'en'})
+    if r:
+        check(topic_keys(r) == [], 'no glossary, no topics')
+    r = topics({'id': 'en:/en/blog/not-indexed-yet', 'text': 'Dispatcher and Fastly CDN caching on AEMaaCS',
+                'namespace': 'en', 'terms': glossary})
+    if r:
+        check(len(topic_keys(r)) > 0, 'an article missing from the index still gets topics from its text')
+    if de_seed:
+        r = topics({'id': de_seed, 'namespace': 'de', 'terms': glossary})
+        if r:
+            keys = topic_keys(r)
+            print(f'    {de_seed}: {", ".join(keys)}')
+            check(len(keys) > 0 and set(keys) <= allowed, 'a German article gets topics from the same glossary')
+            check(r['aggregations']['neighbourhood']['doc_count'] <= 12, 'the neighbourhood is at most 12 documents')
+        bg = call(base, 'POST', '/default/_search/template',
+                  {'id': 'arbory-topics', 'params': {'id': seed_id, 'namespace': 'de', 'terms': glossary}})[1]
+        check(all(h['_source']['namespace'] == 'de' for h in bg['hits']['hits']),
+              'namespace decides the language of the neighbourhood, whatever the seed')
 
     print()
     print('FAILED: ' + '; '.join(FAILURES) if FAILURES else 'All checks passed.')

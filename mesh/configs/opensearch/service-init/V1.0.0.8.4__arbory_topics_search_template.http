@@ -1,0 +1,9 @@
+POST /_scripts/arbory-topics
+Content-Type: application/json
+
+{
+  "script": {
+    "lang": "mustache",
+    "source": "{\n  \"_source\": [\n    \"_id\",\n    \"payload.facets.technology_level0\",\n    \"namespace\"\n  ],\n  \"size\": \"1\",\n  \"query\": {\n    \"bool\": {\n      \"filter\": [\n        { \"regexp\": { \"type.keyword\": \".*page.*\" } },\n        { \"term\": { \"namespace.keyword\": { \"value\": \"{{namespace}}\", \"case_insensitive\": true } } }\n      ],\n      \"must_not\": [\n        { \"regexp\": { \"type.keyword\": \".*fragment.*\" } }\n      ],\n      \"must\": [\n        {\n          \"more_like_this\": {\n            \"fields\": [ \"payload.title\", \"payload.description\", \"payload.content\" ],\n            \"like\": [\n              {{#id}}{ \"_id\": \"{{id}}\" }{{#text}},{{/text}}{{/id}}\n              {{#text}}\"{{text}}\"{{/text}}\n            ],\n            \"include\": true,\n            \"min_term_freq\": 1,\n            \"min_doc_freq\": 2,\n            \"max_query_terms\": 40,\n            \"min_word_length\": 3,\n            \"minimum_should_match\": \"10%\"\n          }\n        }\n      ]\n    }\n  },\n  \"aggs\": {\n    \"neighbourhood\": {\n      \"sampler\": { \"shard_size\": 12 },\n      \"aggs\": {\n        \"topics\": {\n          \"significant_text\": {\n            \"field\": \"payload.content\",\n            \"size\": 30,\n            \"min_doc_count\": 1,\n            \"filter_duplicate_text\": true,\n            \"include\": \"{{terms}}\",\n            \"background_filter\": {\n              \"bool\": {\n                \"filter\": [\n                  { \"regexp\": { \"type.keyword\": \".*page.*\" } },\n                  { \"term\": { \"namespace.keyword\": { \"value\": \"{{namespace}}\", \"case_insensitive\": true } } }\n                ]\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}\n"
+  }
+}

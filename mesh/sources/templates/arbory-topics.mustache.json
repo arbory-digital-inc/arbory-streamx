@@ -1,0 +1,60 @@
+{
+  "_source": [
+    "_id",
+    "payload.facets.technology_level0",
+    "namespace"
+  ],
+  "size": "1",
+  "query": {
+    "bool": {
+      "filter": [
+        { "regexp": { "type.keyword": ".*page.*" } },
+        { "term": { "namespace.keyword": { "value": "{{namespace}}", "case_insensitive": true } } }
+      ],
+      "must_not": [
+        { "regexp": { "type.keyword": ".*fragment.*" } }
+      ],
+      "must": [
+        {
+          "more_like_this": {
+            "fields": [ "payload.title", "payload.description", "payload.content" ],
+            "like": [
+              {{#id}}{ "_id": "{{id}}" }{{#text}},{{/text}}{{/id}}
+              {{#text}}"{{text}}"{{/text}}
+            ],
+            "include": true,
+            "min_term_freq": 1,
+            "min_doc_freq": 2,
+            "max_query_terms": 40,
+            "min_word_length": 3,
+            "minimum_should_match": "10%"
+          }
+        }
+      ]
+    }
+  },
+  "aggs": {
+    "neighbourhood": {
+      "sampler": { "shard_size": 12 },
+      "aggs": {
+        "topics": {
+          "significant_text": {
+            "field": "payload.content",
+            "size": 30,
+            "min_doc_count": 1,
+            "filter_duplicate_text": true,
+            "include": "{{terms}}",
+            "background_filter": {
+              "bool": {
+                "filter": [
+                  { "regexp": { "type.keyword": ".*page.*" } },
+                  { "term": { "namespace.keyword": { "value": "{{namespace}}", "case_insensitive": true } } }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
