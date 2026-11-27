@@ -40,6 +40,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Local OpenSearch for template work (scripts/mesh/local-opensearch.sh): install, data, logs
+/.local/
+
 # Per-session git worktrees and local agent settings
 .claude/worktrees/
 .claude/settings.local.json
