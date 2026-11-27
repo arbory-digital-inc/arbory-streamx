@@ -13,6 +13,7 @@ index and search-template migrations, and the GitHub Actions that publish into i
 | `scripts/vendor/` | Guards and sync tooling for the vendored actions. |
 | `scripts/reindex/` | Rebuild an index by re-publishing a site. |
 | `mesh/sources/`, `scripts/mesh/build-migrations.py` | Readable sources (painless, search templates, mappings) for the `service-init` migrations, and the builder that writes them; `test_search_local.py` runs every migration against a local OpenSearch and exercises the search page's requests. |
+| `scripts/mesh/local-opensearch.sh`, `.claude/skills/local-opensearch/` | The local OpenSearch that test runs against, kept in `.local/` (gitignored): `install`, `start`, `stop`, `status`. The Claude Code skill offers to install it when you work on templates or migrations. |
 | `scripts/search/watch_search.py` | Watch search on one or more edges through a deploy or a region move; reports each edge's longest outage. |
 
 Note that merges to `main` trigger a mesh redeploy — this repository is the

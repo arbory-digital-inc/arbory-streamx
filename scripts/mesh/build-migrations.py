@@ -81,13 +81,10 @@ def template(template_id: str, source_file: str) -> str:
 # Migration file -> how to build it. Versions only ever go up; never reuse one.
 # Applied migrations leave this list once pinned: their sources may move on.
 BUILDS = {
-    # og:image as payload.image (a path for the site's own media), for the
-    # more-like-this cards; a stored-only keyword, never searched.
-    'V1.0.0.8.1__update_default_index_mapping.http': mapping,
-    'V1.0.0.8.2__update_default_index_default_pipeline.http': pipeline,
-    # More like this: the search-mlt-suggestions block's related articles,
-    # same language only (exact namespace).
-    'V1.0.0.8.3__arbory_mlt_search_template.http': lambda: template('arbory-mlt', 'arbory-mlt.mustache.json'),
+    # Topic pills: the product and technology names an article and its nearest
+    # neighbours stand out for against the rest of the site in that language.
+    # The search-topics block sends its glossary as the `terms` include regex.
+    'V1.0.0.8.4__arbory_topics_search_template.http': lambda: template('arbory-topics', 'arbory-topics.mustache.json'),
 }
 
 
